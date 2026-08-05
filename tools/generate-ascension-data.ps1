@@ -31,7 +31,19 @@
 [CmdletBinding()]
 param(
   [string]$ContentPath = "C:\Ascension\Launcher\resources\ascension-live\Data\Content",
-  [string]$RepoPath = (Split-Path -Parent $PSScriptRoot)
+  [string]$RepoPath = (Split-Path -Parent $PSScriptRoot),
+
+  # Which game modes' trees to offer in the spec dropdown. The launcher knows
+  # four: wrath (the ten WotLK classes), classless (Ascension's hero classes),
+  # reborn (the Reborn trees) and coa (Conquest of Azeroth). The data files carry
+  # a Realms bitmask per record but nothing maps a bit to a named realm, so this
+  # cannot be detected - it is a deliberate choice.
+  #
+  # Only tree entries are filtered. Every class keeps its class-level entry, so
+  # sequences already saved under any class ID still resolve and still get a
+  # readable heading in the viewer.
+  [ValidateSet('wrath', 'classless', 'reborn', 'coa')]
+  [string[]]$GameModes = @('classless', 'coa')
 )
 
 $ErrorActionPreference = 'Stop'
@@ -226,8 +238,28 @@ if ($unknownClasses.Count) {
   foreach ($c in ($unknownClasses | Sort-Object)) { $classIds[$c] = $next; $next++ }
 }
 
-# Emit a class only if the data actually contains it, but always keep the
-# twelve base IDs so macros saved under an older build still resolve.
+# Assign each class to one of the launcher's four game modes.
+# Monk and Demon Hunter are Ascension hero classes that happen to sit on the
+# retail IDs 10 and 12, so they belong to 'classless', not 'wrath'.
+$WRATH_CLASSES = @('Warrior', 'Paladin', 'Hunter', 'Rogue', 'Priest', 'DeathKnight', 'Shaman', 'Mage', 'Warlock', 'Druid')
+$classMode = @{}
+foreach ($c in $WRATH_CLASSES) { $classMode[$c] = 'wrath' }
+foreach ($c in $HERO_CLASS_IDS.Keys) { $classMode[$c] = 'classless' }
+$classMode['Monk'] = 'classless'
+$classMode['DemonHunter'] = 'classless'
+foreach ($c in $BASE_CLASS_IDS.Keys) { $classMode["Reborn$c"] = 'reborn' }
+$classMode['RebornGeneral'] = 'reborn'
+$classMode['ConquestOfAzeroth'] = 'coa'
+foreach ($c in $unknownClasses) { $classMode[$c] = 'classless' }
+
+$activeModes = @{}
+foreach ($m in $GameModes) { $activeModes[$m] = $true }
+Write-Host ("  game modes: {0}" -f ($GameModes -join ', ')) -ForegroundColor Cyan
+
+# The ID tables stay COMPLETE. GameModes only decides what the editor offers in
+# its dropdown - it must not shrink the data, or a sequence carrying a spec ID
+# from another mode (say 64, Frost - Mage, imported from another GSE build) would
+# no longer resolve to a class and would lose its heading in the viewer.
 $emitClasses = [ordered]@{}
 foreach ($cls in ($classIds.Keys | Sort-Object { $classIds[$_] })) {
   if ($classTabs.ContainsKey($cls) -or $BASE_CLASS_IDS.Contains($cls)) {
@@ -237,7 +269,8 @@ foreach ($cls in ($classIds.Keys | Sort-Object { $classIds[$_] })) {
 
 # Spec IDs outside the retail set are derived as 1000 + classID*10 + tab index
 # (tabs alphabetical), which is collision-free for class IDs up to 299.
-$specNames = @{}   # specID -> "Tab - Class"
+$specNames = @{}      # specID -> "Tab - Class"   (complete)
+$specMode = @{}       # specID -> game mode
 foreach ($cls in ($classTabs.Keys | Sort-Object)) {
   $cid = $classIds[$cls]
   $tabs = @($classTabs[$cls].Keys | Sort-Object)
@@ -249,8 +282,17 @@ foreach ($cls in ($classTabs.Keys | Sort-Object)) {
       throw "Spec ID collision on $sid ('$($specNames[$sid])' vs '$tab - $cls'). Adjust the ID scheme."
     }
     $specNames[$sid] = "$tab - $cls"
+    $specMode[$sid] = $classMode[$cls]
   }
 }
+
+# The subset the editor dropdown offers.
+$activeSpecIds = @($specNames.Keys | Where-Object { $specMode[$_] -and $activeModes[$specMode[$_]] } | Sort-Object)
+$activeClassIds = @($emitClasses.Keys |
+  Where-Object { $classMode[$_] -and $activeModes[$classMode[$_]] } |
+  ForEach-Object { $emitClasses[$_] } | Sort-Object)
+Write-Host ("  dropdown offers {0} classes + {1} trees (of {2} + {3} total)" -f `
+  $activeClassIds.Count, $activeSpecIds.Count, $emitClasses.Count, $specNames.Count) -ForegroundColor Green
 
 # Class IDs and spec IDs are emitted into the single wotlkSpecIDList table, so
 # any overlap between the two sets would make one entry vanish at load time.
@@ -311,8 +353,39 @@ foreach ($cls in ($classTabs.Keys | Sort-Object)) {
   [void]$sb.AppendLine(("`t[`"{0}`"] = {{ {1} }}," -f (ConvertTo-LuaString $cls), ($tabs -join ', ')))
 }
 [void]$sb.AppendLine('}')
+[void]$sb.AppendLine((@'
+--- The subset of IDs the editor's Specialisation/Class dropdown offers.
+-- Generated for game mode(s): {0}
+-- Every ID above stays resolvable regardless of what is listed here - this only
+-- shortens the dropdown. GSE.GetSpecNames() reads it; if it is missing or empty
+-- the dropdown falls back to offering everything.
+Statics.ActiveSpecIDs = {{
+'@ -f ($GameModes -join ', ')))
+[void]$sb.AppendLine("`t[0] = true, -- Global")
+foreach ($cid in $activeClassIds) {
+  [void]$sb.AppendLine(("`t[{0}] = true," -f $cid))
+}
+foreach ($sid in $activeSpecIds) {
+  [void]$sb.AppendLine(("`t[{0}] = true," -f $sid))
+}
+[void]$sb.AppendLine('}')
+[void]$sb.AppendLine('')
 [void]$sb.AppendLine(@'
-
+--- Class IDs that UnitClass("player") can actually report on a 3.3.5a client.
+-- Everything else - Ascension's hero classes, the Reborn trees, CoA - can only
+-- be reached by filing a sequence under it by hand, so GSE.GetCurrentClassID()
+-- will never return one. Code that decides whether a sequence belongs to the
+-- player has to treat those as always-visible, or they become unreachable.
+Statics.UnitClassResolvableIDs = {
+'@)
+foreach ($cls in $WRATH_CLASSES) {
+  if ($emitClasses.Contains($cls)) {
+    [void]$sb.AppendLine(("`t[{0}] = true, -- {1}" -f $emitClasses[$cls], (ConvertTo-LuaString $cls)))
+  }
+}
+[void]$sb.AppendLine('}')
+[void]$sb.AppendLine('')
+[void]$sb.AppendLine(@'
 -- The viewer and the remote browser both read Statics.SpecIDList; keep it as
 -- the same table so the two can never drift apart.
 Statics.SpecIDList = Statics.wotlkSpecIDList

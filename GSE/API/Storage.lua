@@ -188,12 +188,36 @@ function GSE.ImportCompressedMacroCollection(Sequences)
     GSE.ImportSerialisedSequence(v)
   end
 end
+--- Find the class ID a sequence is actually stored under.
+--    GSE assumed a player's sequences live under their own class ID or 0, which
+--    holds on retail. Ascension is classless: UnitClass("player") reports a base
+--    class, but a sequence can be filed under a hero class such as Necromancer
+--    that UnitClass never returns. Looking only under the current class and 0
+--    left those sequences invisible, un-iconed, and treated as orphans by
+--    GSE.CleanOrphanSequences.
+--    Search order: current class, Global, then any other class.
+function GSE.FindSequenceClassID(sequenceName)
+  local current = GSE.GetCurrentClassID()
+  if GSE.isEmpty(sequenceName) then
+    return current
+  end
+  if GSELibrary[current] and not GSE.isEmpty(GSELibrary[current][sequenceName]) then
+    return current
+  end
+  if GSELibrary[0] and not GSE.isEmpty(GSELibrary[0][sequenceName]) then
+    return 0
+  end
+  for classid, sequences in pairs(GSELibrary) do
+    if type(sequences) == "table" and not GSE.isEmpty(sequences[sequenceName]) then
+      return classid
+    end
+  end
+  return current
+end
+
 --- Return the Active Sequence Version for a Sequence.
 function GSE.GetActiveSequenceVersion(sequenceName)
-  local classid = GSE.GetCurrentClassID()
-  if not GSELibrary[GSE.GetCurrentClassID()] or GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()][sequenceName]) then
-    classid = 0
-  end
+  local classid = GSE.FindSequenceClassID(sequenceName)
   -- Set to default or 1 if no default
   local vers = 1
   if GSELibrary[classid] and GSELibrary[classid][sequenceName] then
@@ -300,8 +324,20 @@ end
 
 function GSE.ReloadSequences()
   GSE.PrintDebugMessage("Reloading Sequences")
-  for name, sequence in pairs(GSELibrary[GSE.GetCurrentClassID()]) do
-    GSE.UpdateSequence(name, sequence.MacroVersions[GSE.GetActiveSequenceVersion(name)])
+  -- Rebuild buttons for every class this character can own sequences under: its
+  -- own class, plus Ascension's hero/Reborn/CoA classes, which UnitClass never
+  -- reports and which therefore never matched GSE.GetCurrentClassID(). Their
+  -- buttons were simply not created, so the macros did nothing when clicked.
+  for classid, sequences in pairs(GSELibrary) do
+    local ownedByPlayer = classid == GSE.GetCurrentClassID()
+      or (classid ~= 0 and not Statics.UnitClassResolvableIDs[classid])
+    if ownedByPlayer and type(sequences) == "table" then
+      for name, sequence in pairs(sequences) do
+        if not GSE.isEmpty(sequence.MacroVersions) then
+          GSE.UpdateSequence(name, sequence.MacroVersions[GSE.GetActiveSequenceVersion(name)])
+        end
+      end
+    end
   end
   if GSEOptions.CreateGlobalButtons then
     if not GSE.isEmpty(GSELibrary[0]) then
@@ -518,10 +554,11 @@ function GSE.CleanOrphanSequences()
     local found = false
     local mname, mtexture, mbody = GetMacroInfo(macid)
     if not GSE.isEmpty(mname) then
-      if GSELibrary[GSE.GetCurrentClassID()] and not GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()][mname]) then
-        found = true
-      end
-      if GSELibrary[0] and not GSE.isEmpty(GSELibrary[0][mname]) then
+      -- Check every class, not just the current one and Global: a sequence filed
+      -- under an Ascension hero class would otherwise look like an orphan and be
+      -- deleted.
+      local owningClass = GSE.FindSequenceClassID(mname)
+      if GSELibrary[owningClass] and not GSE.isEmpty(GSELibrary[owningClass][mname]) then
         found = true
       end
 
@@ -661,8 +698,14 @@ end
 --- This funciton dumps what is currently running on an existing button.
 function GSE.DebugDumpButton(SequenceName)
   local targetreset = ""
-  local looper = GSE.IsLoopSequence(GSELibrary[GSE.GetCurrentClassID()][SequenceName].MacroVersions[GSE.GetActiveSequenceVersion(SequenceName)])
-  if GSELibrary[GSE.GetCurrentClassID()][SequenceName].MacroVersions[GSE.GetActiveSequenceVersion(SequenceName)].Target then
+  local classid = GSE.FindSequenceClassID(SequenceName)
+  if not GSELibrary[classid] or GSE.isEmpty(GSELibrary[classid][SequenceName]) then
+    GSE.Print(string.format(L["Could not find sequence %s."], SequenceName), GNOME)
+    return
+  end
+  local activeVersion = GSELibrary[classid][SequenceName].MacroVersions[GSE.GetActiveSequenceVersion(SequenceName)]
+  local looper = GSE.IsLoopSequence(activeVersion)
+  if activeVersion.Target then
     targetreset = Statics.TargetResetImplementation
   end
   GSE.Print("====================================\nStart GSE Button Dump\n====================================")
@@ -671,7 +714,7 @@ function GSE.DebugDumpButton(SequenceName)
   GSE.Print("KeyRelease" .. _G[SequenceName]:GetAttribute('KeyRelease'))
   GSE.Print("LoopMacro?" .. tostring(looper))
   GSE.Print("====================================\nStepFunction\n====================================")
-  GSE.Print(GSE.PrepareOnClickImplementation(GSELibrary[GSE.GetCurrentClassID()][SequenceName].MacroVersions[GSE.GetActiveSequenceVersion(SequenceName)]))
+  GSE.Print(GSE.PrepareOnClickImplementation(activeVersion))
   GSE.Print("====================================\nEnd GSE Button Dump\n====================================")
 end
 
@@ -806,15 +849,12 @@ function GSE.UpdateMacroString()
   for macid = 1, maxmacros do
     local mname, mtexture, mbody = GetMacroInfo(macid)
     if not GSE.isEmpty(mname) then
-      if GSELibrary[GSE.GetCurrentClassID()] and not GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()][mname]) then
+      -- Resolve across all classes so a sequence under an Ascension hero class
+      -- still gets its macro body refreshed.
+      local owningClass = GSE.FindSequenceClassID(mname)
+      if GSELibrary[owningClass] and not GSE.isEmpty(GSELibrary[owningClass][mname]) then
         EditMacro(macid, nil, nil,  GSE.CreateMacroString(mname))
         GSE.PrintDebugMessage(string.format("Updating macro %s to %s", mname, GSE.CreateMacroString(mname)))
-      end
-      if not GSE.isEmpty(GSELibrary[0]) then
-        if not GSE.isEmpty(GSELibrary[0][mname]) then
-          EditMacro(macid, nil, nil,  GSE.CreateMacroString(mname))
-          GSE.PrintDebugMessage(string.format("Updating macro %s to %s", mname, GSE.CreateMacroString(mname)))
-        end
       end
     end
 
@@ -833,10 +873,9 @@ end
 --- Check if a macro has been created and if the create flag is true and the macro hasnt been created then create it.
 function GSE.OOCCheckMacroCreated(SequenceName, create)
   local found = false
-  local classid = GSE.GetCurrentClassID()
-  if GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()][SequenceName]) then
-    classid = 0
-  end
+  -- Falling back to class 0 here indexed a sequence that was never in Global,
+  -- erroring out before the macro icon could be created. Resolve properly.
+  local classid = GSE.FindSequenceClassID(SequenceName)
   local macroIndex = GetMacroIndexByName(SequenceName)
   if macroIndex and macroIndex ~= 0 then
     found = true
@@ -845,6 +884,10 @@ function GSE.OOCCheckMacroCreated(SequenceName, create)
     end
   else
     if create then
+      if not GSELibrary[classid] or GSE.isEmpty(GSELibrary[classid][SequenceName]) then
+        GSE.Print(string.format(L["Could not find sequence %s to create a macro for."], SequenceName), GNOME)
+        return false
+      end
       local icon = (GSE.isEmpty(GSELibrary[classid][SequenceName].Icon) and Statics.QuestionMark or GSELibrary[classid][SequenceName].Icon)
       GSE.CreateMacroIcon(SequenceName, icon)
       found = true
@@ -929,7 +972,14 @@ function GSE.GetSequenceNames()
       GSEOptions.filterList[Statics.All] = false
       GSEOptions.filterList[Statics.Global] = true
     end
-    if GSEOptions.filterList[Statics.All] or k == GSE.GetCurrentClassID()  then
+    -- Ascension's hero classes, Reborn trees and CoA are never reported by
+    -- UnitClass("player"), so GSE.GetCurrentClassID() cannot match them. Without
+    -- this, a sequence filed under e.g. Necromancer was invisible in the viewer
+    -- unless the "All" filter happened to be on, which looked exactly like the
+    -- save having failed.
+    local ascensionOnly = not Statics.UnitClassResolvableIDs[k] and k ~= 0
+
+    if GSEOptions.filterList[Statics.All] or k == GSE.GetCurrentClassID() or ascensionOnly then
       for i,j in pairs(GSELibrary[k]) do
         if k == GSE.GetCurrentClassID() and GSEOptions.filterList["Class"] then
           keyset[k .. "," .. i] = i

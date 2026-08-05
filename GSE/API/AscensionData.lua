@@ -298,6 +298,139 @@ Statics.AscensionClassTabs = {
 	["WitchDoctor"] = { "Brewing", "Class", "Shadowhunting", "Voodoo" },
 	["WitchHunter"] = { "Boltslinger", "Class", "Darkness", "Inquisition" },
 }
+--- The subset of IDs the editor's Specialisation/Class dropdown offers.
+-- Generated for game mode(s): classless, coa
+-- Every ID above stays resolvable regardless of what is listed here - this only
+-- shortens the dropdown. GSE.GetSpecNames() reads it; if it is missing or empty
+-- the dropdown falls back to offering everything.
+Statics.ActiveSpecIDs = {
+	[0] = true, -- Global
+	[10] = true,
+	[12] = true,
+	[20] = true,
+	[21] = true,
+	[22] = true,
+	[23] = true,
+	[24] = true,
+	[25] = true,
+	[26] = true,
+	[27] = true,
+	[28] = true,
+	[29] = true,
+	[30] = true,
+	[31] = true,
+	[32] = true,
+	[33] = true,
+	[34] = true,
+	[35] = true,
+	[36] = true,
+	[37] = true,
+	[38] = true,
+	[320] = true,
+	[1101] = true,
+	[1102] = true,
+	[1103] = true,
+	[1104] = true,
+	[1121] = true,
+	[1122] = true,
+	[1123] = true,
+	[1124] = true,
+	[1201] = true,
+	[1202] = true,
+	[1203] = true,
+	[1204] = true,
+	[1211] = true,
+	[1212] = true,
+	[1213] = true,
+	[1214] = true,
+	[1221] = true,
+	[1222] = true,
+	[1223] = true,
+	[1224] = true,
+	[1231] = true,
+	[1232] = true,
+	[1233] = true,
+	[1234] = true,
+	[1241] = true,
+	[1242] = true,
+	[1243] = true,
+	[1244] = true,
+	[1251] = true,
+	[1252] = true,
+	[1253] = true,
+	[1254] = true,
+	[1261] = true,
+	[1262] = true,
+	[1263] = true,
+	[1264] = true,
+	[1271] = true,
+	[1272] = true,
+	[1273] = true,
+	[1274] = true,
+	[1281] = true,
+	[1282] = true,
+	[1283] = true,
+	[1284] = true,
+	[1291] = true,
+	[1292] = true,
+	[1293] = true,
+	[1294] = true,
+	[1301] = true,
+	[1302] = true,
+	[1303] = true,
+	[1304] = true,
+	[1311] = true,
+	[1312] = true,
+	[1313] = true,
+	[1314] = true,
+	[1321] = true,
+	[1322] = true,
+	[1323] = true,
+	[1324] = true,
+	[1331] = true,
+	[1332] = true,
+	[1333] = true,
+	[1334] = true,
+	[1341] = true,
+	[1342] = true,
+	[1343] = true,
+	[1344] = true,
+	[1351] = true,
+	[1352] = true,
+	[1353] = true,
+	[1354] = true,
+	[1361] = true,
+	[1362] = true,
+	[1363] = true,
+	[1364] = true,
+	[1371] = true,
+	[1372] = true,
+	[1373] = true,
+	[1374] = true,
+	[1381] = true,
+	[1382] = true,
+	[1383] = true,
+	[1384] = true,
+	[4201] = true,
+}
+
+--- Class IDs that UnitClass("player") can actually report on a 3.3.5a client.
+-- Everything else - Ascension's hero classes, the Reborn trees, CoA - can only
+-- be reached by filing a sequence under it by hand, so GSE.GetCurrentClassID()
+-- will never return one. Code that decides whether a sequence belongs to the
+-- player has to treat those as always-visible, or they become unreachable.
+Statics.UnitClassResolvableIDs = {
+	[1] = true, -- Warrior
+	[2] = true, -- Paladin
+	[3] = true, -- Hunter
+	[4] = true, -- Rogue
+	[5] = true, -- Priest
+	[6] = true, -- DeathKnight
+	[7] = true, -- Shaman
+	[8] = true, -- Mage
+	[9] = true, -- Warlock
+	[11] = true, -- Druid
+}
 
 -- The viewer and the remote browser both read Statics.SpecIDList; keep it as
 -- the same table so the two can never drift apart.

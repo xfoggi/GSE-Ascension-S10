@@ -121,7 +121,29 @@ def main():
     check("Global is class 0", classes[0] == "Global")
     check("base WotLK IDs preserved", classes[1] == "Warrior" and classes[8] == "Mage" and classes[11] == "Druid")
     check("hero classes present", classes[25] == "Necromancer" and classes[35] == "Tinker")
-    check("Reborn classes clear the spec ID band", classes[301] == "RebornWarrior")
+    check("Reborn classes still resolvable", classes[301] == "RebornWarrior")
+
+    # The dropdown is restricted to the active game mode, but every ID stays in
+    # the tables so a sequence from another mode still resolves to a class.
+    active = Statics.ActiveSpecIDs
+    n_active = sum(1 for _ in active.items())
+    check("ActiveSpecIDs present", active is not None and n_active > 0, f"{n_active} entries")
+    check("dropdown is smaller than the full table", n_active < n_specs, f"{n_active} < {n_specs}")
+    check("Global offered", active[0] is True)
+    check("Necromancer offered", active[25] is True)
+    check("wrath tree 64 NOT offered", active[64] is None)
+    check("Reborn class 301 NOT offered", active[301] is None)
+    names = GSE.GetSpecNames()
+    check("GetSpecNames excludes wrath trees", names["Frost - Mage"] is None)
+    check("GetSpecNames includes Necromancer", names["Necromancer"] == "Necromancer")
+
+    # UnitClass can only ever report the ten WotLK classes. Anything else has to
+    # be treated as always-visible or its sequences become unreachable.
+    resolvable = Statics.UnitClassResolvableIDs
+    check("UnitClass-resolvable table present", resolvable is not None)
+    check("Warlock (9) is UnitClass-resolvable", resolvable[9] is True)
+    check("Necromancer (25) is NOT UnitClass-resolvable", resolvable[25] is None)
+    check("Monk (10) is NOT UnitClass-resolvable", resolvable[10] is None)
     check("retail spec IDs preserved", specs[64] == "Frost - Mage" and specs[71] == "Arms - Warrior")
     check("SpecIDList aliases spec table", Statics.SpecIDList[64] == "Frost - Mage")
     check("SpecIDHashList inverted", Statics.SpecIDHashList["Frost - Mage"] == 64)
@@ -216,6 +238,23 @@ def main():
     check("base class has an icon", "inv_sword_27" in GSE.GetClassIcon(1))
     check("hero class falls back, not nil", GSE.GetClassIcon(25) is not None)
     check("garbage ID falls back, not nil", GSE.GetClassIcon("x") is not None)
+
+    # Regression: a sequence saved under a hero class used to be invisible in the
+    # viewer, get no macro icon, not be rebuilt on reload, and be deleted as an
+    # orphan - all because GSE.GetCurrentClassID() can never return that ID.
+    print("\nhero-class sequence reachability (Storage.lua):")
+    storage_src = (REPO / "GSE/API/Storage.lua").read_text(encoding="utf-8")
+    check("FindSequenceClassID exists", "function GSE.FindSequenceClassID" in storage_src)
+    check("GetActiveSequenceVersion uses it",
+          "function GSE.GetActiveSequenceVersion(sequenceName)\n  local classid = GSE.FindSequenceClassID" in storage_src)
+    check("orphan cleanup uses it", storage_src.count("GSE.FindSequenceClassID(mname)") >= 2)
+    check("macro-icon creation uses it", "GSE.FindSequenceClassID(SequenceName)" in storage_src)
+    check("viewer filter honours Ascension-only classes",
+          "Statics.UnitClassResolvableIDs[k]" in storage_src)
+    check("ReloadSequences covers every owned class",
+          "for classid, sequences in pairs(GSELibrary) do" in storage_src)
+    check("no unguarded GetCurrentClassID index left in ReloadSequences",
+          "pairs(GSELibrary[GSE.GetCurrentClassID()]) do\n    GSE.UpdateSequence" not in storage_src)
 
     print("\nspell tables:")
     key = GSE.TranslatorLanguageTables["KEY"]["enUS"]

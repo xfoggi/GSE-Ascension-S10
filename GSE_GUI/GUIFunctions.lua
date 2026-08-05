@@ -146,7 +146,7 @@ function GSE.getSequenceName()
 	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
 	end
   end
-  for name, sequence in pairs(GSELibrary[GSE.GetCurrentClassID()]) do
+  for name, sequence in pairs(GSELibrary[GSE.GetCurrentClassID()] or {}) do
     if newSeqNameTemp == name then
 	  newSeqNumber = numberOfSeqs+1
 	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))

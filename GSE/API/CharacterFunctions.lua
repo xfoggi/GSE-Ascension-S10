@@ -241,10 +241,21 @@ function GSE.isSpecIDForCurrentClass(specID)
   return specID == currentClassID or GSE.GetClassIDforSpec(specID) == currentClassID
 end
 
+--- Names offered by the editor's Specialisation/Class dropdown.
+--    Restricted to Statics.ActiveSpecIDs, which the generator fills for the
+--    configured Ascension game mode - listing all 145 trees made the dropdown
+--    unusable. Everything outside the active set stays resolvable, so a sequence
+--    carrying a spec ID from another mode keeps working; it just is not offered
+--    as a new choice. Falls back to offering everything if the table is absent.
 function GSE.GetSpecNames()
   local keyset = {}
-  for _, v in pairs(Statics.wotlkSpecIDList or {}) do
-    keyset[v] = v
+  local active = Statics.ActiveSpecIDs
+  local restrict = not GSE.isEmpty(active)
+
+  for id, v in pairs(Statics.wotlkSpecIDList or {}) do
+    if not restrict or active[id] then
+      keyset[v] = v
+    end
   end
   return keyset
 end
