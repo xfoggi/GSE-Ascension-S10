@@ -20,7 +20,12 @@ if GetLocale() ~= "enUS" then
       if spellname then
         GSE.TranslatorLanguageTables[Statics.TranslationKey][GetLocale()][k] = spellname
         GSE.TranslatorLanguageTables[Statics.TranslationHash][GetLocale()][spellname] = k
-        GSE.TranslatorLanguageTables[Statics.TranslationShadow][GetLocale()][spellname] = string.lower(k)
+        -- The shadow table is keyed by the lower-cased spell name and holds the
+        -- spell ID, matching enUSSHADOW.lua. This previously stored
+        -- string.lower(k) - the lower-cased ID - under the unmodified name,
+        -- which made the case-insensitive fallback useless in every locale but
+        -- enUS.
+        GSE.TranslatorLanguageTables[Statics.TranslationShadow][GetLocale()][string.lower(spellname)] = k
       end
       i = i + 1
     end
@@ -237,7 +242,11 @@ function GSE.TranslateSpell(str, fromLocale, toLocale, cleanNewLines)
       GSE.PrintDebugMessage("Did not find : " .. etc .. " in " .. fromLocale .. " Hash table checking shadow table", GNOME)
       -- try the shadow table
       local nfoundspell = GSE.TranslatorLanguageTables[Statics.TranslationShadow][fromLocale][string.lower(etc)]
-      if not nfoundspell or GSE.isEmpty(GSE.TranslatorLanguageTables[Statics.TranslationShadow][toLocale][nfoundspell]) then
+      -- The shadow lookup yields a spell ID, so the target locale has to be
+      -- checked against the key table. Checking the shadow table here (which is
+      -- keyed by name) always missed, so this fallback never fired and
+      -- differently-cased spell names were reported as unknown.
+      if not nfoundspell or GSE.isEmpty(GSE.TranslatorLanguageTables[Statics.TranslationKey][toLocale][nfoundspell]) then
         nfoundspell = false
       end
       if nfoundspell then

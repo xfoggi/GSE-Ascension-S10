@@ -1,8 +1,8 @@
 ## Interface: 30300
 ## Title: GSE
-## Notes: Allows you to execute a sequence of macros without stopping on unusable spells.
+## Notes: Allows you to execute a sequence of macros without stopping on unusable spells.  Spell and class data generated for Project Ascension Season 10.
 ## Author: TimothyLuke, Gummed, cerberus
-## Version: 2204-wotlk
+## Version: 2204-wotlk-s10
 ## SavedVariables: GSEOptions GSELibrary
 ## OptionalDeps: WeakAuras
 
@@ -55,6 +55,7 @@ Localization\ModL_zhTW.lua
 # Startup
 API\Init.lua
 API\Statics.lua
+API\AscensionData.lua
 API\InitialOptions.lua
 
 # Spells Language Strings

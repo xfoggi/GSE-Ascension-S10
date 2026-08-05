@@ -1054,8 +1054,14 @@ function GSE.ConvertLegacySequence(sequence)
 end
 
 --- Load in the sample macros for the current class.
+--    No samples ship with the Ascension build, and most Ascension class IDs
+--    never had any, so a missing entry is the normal case rather than an error.
 function GSE.LoadSampleMacros(classID)
-  GSE.ImportCompressedMacroCollection(Statics.SampleMacros[classID])
+  local samples = Statics.SampleMacros and Statics.SampleMacros[classID]
+  if GSE.isEmpty(samples) then
+    return
+  end
+  GSE.ImportCompressedMacroCollection(samples)
 end
 
 

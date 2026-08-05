@@ -2,8 +2,10 @@ local GNOME, _ = ...
 
 local GSE = GSE
 
-local currentclassDisplayName, currentenglishclass=UnitClass("player")
-local currentclassId = GSE.GetCurrentClassID()
+-- Class and spec are deliberately not cached at file scope: this runs while the
+-- addon loads, before UnitClass("player") returns anything useful, and on
+-- Ascension the answer changes whenever the character redrafts. Call
+-- GSE.GetCurrentClassID()/GetCurrentSpecID() at the point of use instead.
 local L = GSE.L
 local Statics = GSE.Static
 
@@ -334,10 +336,11 @@ GSE:RegisterChatCommand("gse", "GSSlash")
 --- Handle slash commands
 function GSE:GSSlash(input)
   if string.lower(input) == "showspec" then
-    local currentSpec = GSE.GetCurrentSpecID()
     local currentSpecID, specname, specicon = GSE.GetCurrentSpecID()
-   -- local _, specname, specdescription, specicon, _, specrole, specclass = GetSpecializationInfoByID(currentSpecID)
-    GSE.Print(L["Your current Specialisation is "] .. currentSpecID .. ':' .. specname .. L["  The Alternative ClassID is "] .. currentclassId, GNOME)
+    -- Read the class ID now rather than using the file-scope copy, which is
+    -- captured while the addon loads and before UnitClass("player") is usable.
+    -- specname can be absent when the client reports no talent trees.
+    GSE.Print(L["Your current Specialisation is "] .. tostring(currentSpecID) .. ':' .. tostring(specname or Statics.Global) .. L["  The Alternative ClassID is "] .. tostring(GSE.GetCurrentClassID()), GNOME)
   elseif string.lower(input) == "help" then
     PrintGnomeHelp()
   elseif string.lower(input) == "cleanorphans" or string.lower(input) == "clean" then
