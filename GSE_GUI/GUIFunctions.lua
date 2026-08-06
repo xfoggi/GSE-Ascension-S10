@@ -42,7 +42,10 @@ function GSE.GUILoadEditor(key, incomingframe, recordedstring)
   if GSE.isEmpty(key) then
     classid = GSE.GetCurrentClassID()
     sequenceName = GSE.getSequenceName()
-	isNewFirstTimeCreated=true
+	-- Editor.lua reads GSE.isNewFirstTimeCreated. This set a bare global of a
+	-- similar name, so the field it reads never changed here and the flag that
+	-- Viewer.lua left permanently true was the one that won.
+	GSE.isNewFirstTimeCreated=true
     sequence = {
       ["Author"] = GSE.GetCharacterName(),
       ["Talents"] = GSE.GetCurrentTalents(),
@@ -85,7 +88,7 @@ function GSE.GUILoadEditor(key, incomingframe, recordedstring)
       end
       return
     end
-	isNewFirstTimeCreated=false
+	GSE.isNewFirstTimeCreated=false
   end
   GSE.GUIEditFrame.SequenceName = sequenceName
   GSE.GUIEditFrame.Sequence = sequence

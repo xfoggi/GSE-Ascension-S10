@@ -128,27 +128,40 @@ function GSE.OOCAddSequenceToCollection(sequenceName, sequence, classid)
       found = true
   end
   if found then
-    if GSE.isEmpty(GSELibrary[classid][sequenceName].ManualIntervention) then --- Added by me
-		  -- Macro hasnt been touched.
-		  GSE.PrintDebugMessage(L["No changes were made to "].. sequenceName, "Storage")
-		
-		-- check if source the same.  If so ignore
-		if sequence.MacroVersions and GSELibrary[classid] and GSELibrary[classid][sequenceName] and GSELibrary[classid][sequenceName].MacroVersions then
-		  for k,v in ipairs(sequence.MacroVersions) do
-		    for i, j in ipairs(GSELibrary[classid][sequenceName].MacroVersions) do
-			if GSE.CompareSequence(v,j) then
-			  GSE.PrintDebugMessage("Macro Version already exists", "Storage")
-			else
-			  GSE.Print (string.format(L["A new version of %s has been added."], sequenceName), GNOME)
-			  GSE.PrintDebugMessage("adding ".. k, "Storage")
-			  table.insert(GSELibrary[classid][sequenceName].MacroVersions, v)
-
-			  GSE.PrintDebugMessage("Finished colliding entry entry", "Storage")
-			end
-		    end
-		  end
-		end
-	end--- Added by me
+    -- Merge into a sequence this character already owns. Keep only the versions
+    -- that are genuinely new.
+    --
+    -- Two bugs lived here. The whole block sat behind a check that
+    -- ManualIntervention was empty, so as soon as a sequence had been edited
+    -- once, saving over it did nothing whatsoever and the caller was still told
+    -- it had been saved. And the inner loop inserted on the first version that
+    -- did not match, comparing against every stored version in turn, so merging
+    -- one version into a library holding N of them appended up to N-1 copies of
+    -- the same macro - while iterating the very table it was appending to.
+    local stored = GSELibrary[classid][sequenceName]
+    if sequence.MacroVersions and stored.MacroVersions then
+      local added = 0
+      for _, incoming in ipairs(sequence.MacroVersions) do
+        local duplicate = false
+        for _, existing in ipairs(stored.MacroVersions) do
+          if GSE.CompareSequence(incoming, existing) then
+            duplicate = true
+            break
+          end
+        end
+        if duplicate then
+          GSE.PrintDebugMessage("Macro Version already exists", "Storage")
+        else
+          table.insert(stored.MacroVersions, incoming)
+          added = added + 1
+        end
+      end
+      if added > 0 then
+        GSE.Print(string.format(L["A new version of %s has been added."], sequenceName), GNOME)
+      else
+        GSE.PrintDebugMessage(L["No changes were made to "] .. sequenceName, "Storage")
+      end
+    end
   else
     -- New Sequence
     if GSE.isEmpty(sequence.Author) then
@@ -168,8 +181,17 @@ function GSE.OOCAddSequenceToCollection(sequenceName, sequence, classid)
   if not GSE.isEmpty(confirmationtext) then
     GSE.Print(GSEOptions.EmphasisColour .. sequenceName .. "|r" .. L[" was imported with the following errors."] .. " " .. confirmationtext, GNOME)
   end
-  if classid == GSE.GetCurrentClassID() or classid == 0 then
-     GSE.UpdateSequence(sequenceName, sequence.MacroVersions[sequence.Default])
+  -- Build the button now if this character can own the sequence. Same rule as
+  -- GSE.ReloadSequences: the current class, Global, or one of Ascension's
+  -- hero/Reborn/CoA classes, which UnitClass never reports and which therefore
+  -- never equalled GSE.GetCurrentClassID(). Without the third case an imported
+  -- Necromancer sequence had no button until the next reload.
+  local ownedByPlayer = classid == GSE.GetCurrentClassID()
+    or classid == 0
+    or (classid ~= 0 and not Statics.UnitClassResolvableIDs[classid])
+  local activeVersion = sequence.MacroVersions and sequence.MacroVersions[sequence.Default or 1]
+  if ownedByPlayer and activeVersion then
+     GSE.UpdateSequence(sequenceName, activeVersion)
   end
   --- Added by me
   GSELibrary[classid][sequenceName].ManualIntervention = false

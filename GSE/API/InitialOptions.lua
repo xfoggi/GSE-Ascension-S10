@@ -76,6 +76,7 @@ function GSE.SetDefaultOptions()
   GSEOptions.DebugModules[Statics.DebugModules["API"]] = false
   GSEOptions.DebugModules[Statics.DebugModules["GUI"]] = false
   GSEOptions.DebugModules[Statics.DebugModules["Versions"]] = false
+  GSEOptions.DebugModules[Statics.DebugModules["Events"]] = false
 
   GSEOptions.filterList = {}
   GSEOptions.filterList[Statics.Spec] = true

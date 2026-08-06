@@ -3,6 +3,7 @@ local L = LibStub("AceLocale-3.0"):NewLocale("GSE", "enUS", true)
 
 L["Update"] = true
 L["<SEQUENCEDEBUG> |r "] = true
+L["GSE could not process the queued %s action: %s"] = true
 L["<DEBUG> |r "] = true
 
 --Output Strings from Core

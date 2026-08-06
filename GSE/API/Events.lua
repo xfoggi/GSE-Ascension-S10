@@ -141,6 +141,16 @@ function GSE:ADDON_LOADED(event, addon)
   if GSE.isEmpty(GSELibrary) then
     GSELibrary = {}
   end
+  -- Saved variables replace GSEOptions wholesale, so a profile written by an
+  -- older build never gains debug channels added since. Backfill them or the
+  -- new ones are missing from the options panel forever.
+  if type(GSEOptions.DebugModules) == "table" then
+    for _, module in pairs(Statics.DebugModules) do
+      if GSEOptions.DebugModules[module] == nil then
+        GSEOptions.DebugModules[module] = false
+      end
+    end
+  end
   if GSE.isEmpty(GSELibrary[GSE.GetCurrentClassID()]) then
     GSELibrary[GSE.GetCurrentClassID()] = {}
   end
@@ -415,14 +425,28 @@ function GSE:ProcessOOCQueue()
     return
   end
   
+  -- Collect first, then process. The previous version nil'd entries inside an
+  -- ipairs over the same table, which leaves holes and makes the # operator -
+  -- and therefore the next table.insert - undefined.
+  local batch = {}
   for k,v in ipairs(GSE.OOCQueue) do
-    if not InCombatLockdown() then
+    batch[k] = v
+  end
+  if InCombatLockdown() then
+    return
+  end
+  for k = 1, table.getn(batch) do
+    GSE.OOCQueue[k] = nil
+  end
+
+  for k,v in ipairs(batch) do
+    do
       local success, err = pcall(function()
         if GSE.isEmpty(v) or GSE.isEmpty(v.action) then
-          GSE.PrintDebugMessage("Invalid OOC Queue entry", "Events")
+          GSE.PrintDebugMessage("Invalid OOC Queue entry", Statics.DebugModules["Events"])
           return
         end
-        
+
         if v.action == "UpdateSequence" then
           GSE.OOCUpdateSequence(v.name, v.macroversion)
         elseif v.action == "Save" then
@@ -454,11 +478,15 @@ function GSE:ProcessOOCQueue()
         end
       end)
       
+      -- A failure here used to go to GSE.PrintDebugMessage with the module
+      -- "Events". No such module exists in Statics.DebugModules, so the message
+      -- could never be switched on and every error thrown while saving was
+      -- discarded - the editor still reported "Sequence saved". Failing a save
+      -- silently is worse than being noisy, so say it out loud.
       if not success then
-        GSE.PrintDebugMessage("Error processing OOC Queue item: " .. tostring(err), "Events")
+        GSE.Print(string.format(L["GSE could not process the queued %s action: %s"],
+          tostring(v.action), tostring(err)), GNOME)
       end
-      
-      GSE.OOCQueue[k] = nil
     end
   end
 end

@@ -263,7 +263,11 @@ function GSE.GUIViewerToolbar(container)
   local newbutton = AceGUI:Create("Button")
   newbutton:SetText(L["New"])
   newbutton:SetWidth(150)
-  newbutton:SetCallback("OnClick", function() GSE.isNewFirstTimeCreated=true,GSE.GUILoadEditor(nil, viewframe) end)
+  -- This was written as "GSE.isNewFirstTimeCreated=true,GSE.GUILoadEditor(...)",
+  -- a single assignment with two values. Lua evaluates the right hand side
+  -- first, so the editor opened before the flag was set and then discarded the
+  -- call's result. GUILoadEditor sets the flag itself; sequence it properly.
+  newbutton:SetCallback("OnClick", function() GSE.GUILoadEditor(nil, viewframe) end)
   buttonGroup:AddChild(newbutton)
 
   local updbutton = AceGUI:Create("Button")

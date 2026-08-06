@@ -243,6 +243,7 @@ Statics.DebugModules["Versions"] = "Versions"
 Statics.DebugModules[Statics.SourceTransmission] = Statics.SourceTransmission
 Statics.DebugModules["API"] = "API"
 Statics.DebugModules["GUI"] = "GUI"
+Statics.DebugModules["Events"] = "Events"
 
 
 Statics.TranslationKey = "KEY"

@@ -653,7 +653,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   spellbox:SetNumLines(8)
   spellbox:DisableButton(true)
   spellbox:SetFullWidth(true)
-  spellbox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(KeyPressbox) end)
+  spellbox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(spellbox) end)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version]) then
     spellbox:SetText(table.concat(editframe.Sequence.MacroVersions[version], "\n"))
   end
@@ -680,7 +680,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   KeyReleasebox:SetNumLines(2)
   KeyReleasebox:DisableButton(true)
   KeyReleasebox:SetWidth((editframe.Width - 210) * 0.48)
-  KeyReleasebox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(KeyPressbox) end)
+  KeyReleasebox.editBox:SetScript( "OnLeave",  function() GSE.GUIParseText(KeyReleasebox) end)
   if not GSE.isEmpty(editframe.Sequence.MacroVersions[version].KeyRelease) then
     KeyReleasebox:SetText(table.concat(editframe.Sequence.MacroVersions[version].KeyRelease, "\n"))
   end
@@ -840,9 +840,13 @@ function GSE.GUISelectEditorTab(container, event, group)
   if group == "config" then
     GSE:GUIDrawMetadataEditor(container)
   elseif group == "new" then
+	  -- A brand new sequence has to exist in the library before a second version
+	  -- can be added to it. Clear the flag afterwards: it used to stay set, so
+	  -- every later click of the New tab wrote the sequence out again.
 	  if(GSE.isNewFirstTimeCreated) then
 		GSE.GUIUpdateSequenceDefinition(editframe.ClassID, editframe.SequenceName, editframe.Sequence)
 		editframe.save = true
+		GSE.isNewFirstTimeCreated = false
 	  end
     -- Copy the Default to a new version
     table.insert(editframe.Sequence.MacroVersions, GSE.CloneMacroVersion(editframe.Sequence.MacroVersions[editframe.Sequence.Default]))
