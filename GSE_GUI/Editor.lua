@@ -166,7 +166,20 @@ function GSE.GUICreateEditorTabs()
 end
 
 function GSE.GUIEditorPerformLayout(frame)
+  -- Everything is about to be released, so the remembered widgets go stale.
+  editframe.MacroWidgets = nil
+
+  -- AceGUI:Release calls widget:OnRelease() before it empties widget.events,
+  -- and an EditBox clears itself in OnRelease. Its OnTextChanged does not test
+  -- userInput, so the handler below still fired and wiped SequenceName to "".
+  -- Every save from then on hit the empty-name guard in
+  -- GUIUpdateSequenceDefinition and silently did nothing. Hold the name across
+  -- the release.
+  local sequenceName = editframe.SequenceName
+  editframe.releasing = true
   frame:ReleaseChildren()
+  editframe.releasing = false
+  editframe.SequenceName = sequenceName
   local headerGroup = AceGUI:Create("SimpleGroup")
   headerGroup:SetFullWidth(true)
   headerGroup:SetLayout("Flow")
@@ -175,7 +188,13 @@ function GSE.GUIEditorPerformLayout(frame)
   local nameeditbox = AceGUI:Create("EditBox")
   nameeditbox:SetLabel(L["Sequence Name"])
   nameeditbox:SetWidth(250)
-  nameeditbox:SetCallback("OnTextChanged", function() editframe.SequenceName = nameeditbox:GetText(); end)
+  nameeditbox:SetCallback("OnTextChanged", function()
+    -- AceGUI fires this while releasing the widget, with the text it just
+    -- blanked. Taking that value wiped the sequence name, and every save
+    -- after the first hit the empty-name guard and did nothing.
+    if editframe.releasing then return end
+    editframe.SequenceName = nameeditbox:GetText()
+  end)
   nameeditbox:DisableButton( true)
   nameeditbox:SetText(editframe.SequenceName)
   editframe.nameeditbox = nameeditbox
@@ -243,8 +262,23 @@ function GSE.GUIEditorPerformLayout(frame)
   savebutton:SetWidth(150)
   savebutton:SetCallback("OnClick", function()
     editframe.Sequence.ManualIntervention = true
-    nameeditbox:SetText(nameeditbox:GetText())
-    editframe.SequenceName = nameeditbox:GetText()
+    -- Only take the box when it holds something. An empty box is never a
+    -- rename, and copying it over the real name is what made every save after
+    -- the first one silently do nothing.
+    local typedName = GSE.TrimWhiteSpace(nameeditbox:GetText() or "")
+    if not GSE.isEmpty(typedName) then
+      editframe.SequenceName = typedName
+    end
+    nameeditbox:SetText(editframe.SequenceName)
+    -- AceGUI swallows errors thrown inside a button handler, so a fault in the
+    -- commit would abort the save with no sign of it. Contain it and carry on.
+    GSE.LogToFile("---- Save clicked: " .. tostring(editframe.SequenceName)
+      .. " classid=" .. tostring(editframe.ClassID))
+    local committed, err = pcall(GSE.GUICommitMacroEditor)
+    if not committed then
+      GSE.Print("GSE could not read the editor boxes: " .. tostring(err))
+      GSE.LogToFile("commit FAILED: " .. tostring(err))
+    end
     GSE.GUIUpdateSequenceDefinition(editframe.ClassID, editframe.SequenceName, editframe.Sequence)
     editframe.save = true
   end)
@@ -327,6 +361,7 @@ function GSE:GUIDrawMetadataEditor(container)
   contentcontainer:AddChild(metasimplegroup)
   talentseditbox:SetText(editframe.Sequence.Talents)
   talentseditbox:SetCallback("OnTextChanged", function (obj,event,key)
+    if editframe.releasing then return end
     editframe.Sequence.Talents = key
   end)
   local helpeditbox = AceGUI:Create("MultiLineEditBox")
@@ -339,6 +374,7 @@ function GSE:GUIDrawMetadataEditor(container)
     helpeditbox:SetText(editframe.Sequence.Help)
   end
   helpeditbox:SetCallback("OnTextChanged", function (obj,event,key)
+    if editframe.releasing then return end
     editframe.Sequence.Help = key
   end)
   contentcontainer:AddChild(helpeditbox)
@@ -356,6 +392,7 @@ function GSE:GUIDrawMetadataEditor(container)
     helplinkeditbox:SetText(editframe.Sequence.Helplink)
   end
   helplinkeditbox:SetCallback("OnTextChanged", function (obj,event,key)
+    if editframe.releasing then return end
     editframe.Sequence.Helplink = key
   end)
   helpgroup1:AddChild(helplinkeditbox)
@@ -372,6 +409,7 @@ function GSE:GUIDrawMetadataEditor(container)
     authoreditbox:SetText(editframe.Sequence.Author)
   end
   authoreditbox:SetCallback("OnTextChanged", function (obj,event,key)
+    if editframe.releasing then return end
     editframe.Sequence.Author = key
   end)
   helpgroup1:AddChild(authoreditbox)
@@ -708,6 +746,23 @@ function GSE:GUIDrawMacroEditor(container, version)
   end)
   contentcontainer:AddChild(linegroup3)
 
+  -- Remember the live widgets for this version so saving can read them back
+  -- directly. The OnTextChanged callbacks above are the only thing that ever
+  -- wrote KeyPress, PreMacro, KeyRelease, PostMacro and StepFunction into the
+  -- sequence, and anything that stops them firing loses the edit with no
+  -- warning - the Sequence box survived only because its handler mutates the
+  -- version table in place. Reading the boxes at save time cannot miss.
+  editframe.MacroWidgets = {
+    version = version,
+    StepFunction = stepdropdown,
+    LoopLimit = looplimit,
+    KeyPress = KeyPressbox,
+    PreMacro = PreMacro,
+    Sequence = spellbox,
+    KeyRelease = KeyReleasebox,
+    PostMacro = PostMacro,
+  }
+
   layoutcontainer:AddChild(scrollcontainer)
 
   local toolbarcontainer = AceGUI:Create("SimpleGroup") -- "InlineGroup" is also good
@@ -832,8 +887,74 @@ function GSE:GUIDrawMacroEditor(container, version)
   container:AddChild(layoutcontainer)
 end
 
+--- Read the macro editor's boxes back into the sequence.
+-- Safe to call at any time: it does nothing unless a macro version tab is
+-- currently drawn, and it only touches the version that tab belongs to.
+function GSE.GUICommitMacroEditor()
+  local widgets = editframe.MacroWidgets
+  if not widgets then
+    GSE.LogToFile("commit: MacroWidgets is nil - no macro tab drawn, boxes not read")
+    return
+  end
+  local macroversion = editframe.Sequence
+    and editframe.Sequence.MacroVersions
+    and editframe.Sequence.MacroVersions[widgets.version]
+  if type(macroversion) ~= "table" then
+    GSE.LogToFile("commit: MacroVersions[" .. tostring(widgets.version) .. "] is "
+      .. type(macroversion) .. ", nothing to write into")
+    return
+  end
+
+  local report = {}
+  local function lines(widget, label)
+    local text = widget:GetText()
+    table.insert(report, label .. "=" .. string.len(text or ""))
+    if GSE.isEmpty(GSE.TrimWhiteSpace(text or "")) then
+      return {}
+    end
+    return GSE.SplitMeIntolines(text)
+  end
+
+  macroversion.KeyPress = lines(widgets.KeyPress, "KeyPress")
+  macroversion.PreMacro = lines(widgets.PreMacro, "PreMacro")
+  macroversion.KeyRelease = lines(widgets.KeyRelease, "KeyRelease")
+  macroversion.PostMacro = lines(widgets.PostMacro, "PostMacro")
+
+  local step = widgets.StepFunction:GetValue()
+  if not GSE.isEmpty(step) then
+    macroversion.StepFunction = step
+  end
+
+  -- Not "x and nil or y": `and nil` is falsy, so that idiom always yields y and
+  -- an untouched Inner Loop Limit was being stored as an empty string.
+  local limit = widgets.LoopLimit:GetText()
+  if GSE.isEmpty(GSE.TrimWhiteSpace(limit or "")) then
+    macroversion.LoopLimit = nil
+  else
+    macroversion.LoopLimit = limit
+  end
+
+  -- Replace the numbered lines. Count first: clearing them inside an ipairs
+  -- over the same table stops the iteration at the first hole.
+  local body = lines(widgets.Sequence, "Sequence")
+  for k = table.getn(macroversion), 1, -1 do
+    macroversion[k] = nil
+  end
+  for k,v in ipairs(body) do
+    macroversion[k] = v
+  end
+
+  GSE.LogToFile("commit v" .. tostring(widgets.version) .. " chars read: " .. table.concat(report, " "))
+  GSE.LogToFile("commit v" .. tostring(widgets.version) .. " result: " .. GSE.DescribeMacroVersion(macroversion))
+end
+
 function GSE.GUISelectEditorTab(container, event, group)
+  -- Leaving a version tab releases its widgets, so take their contents first.
+  GSE.GUICommitMacroEditor()
+  editframe.MacroWidgets = nil
+  editframe.releasing = true
   container:ReleaseChildren()
+  editframe.releasing = false
   editframe.SelectedTab = group
   editframe.nameeditbox:SetText(GSE.GUIEditFrame.SequenceName)
   editframe.iconpicker:SetImage(GSE.GetMacroIcon(editframe.ClassID, editframe.SequenceName))

@@ -403,3 +403,5 @@ L["Party setting changed to Default."] = true
 L["Macro found by the name %sPVP%s. Rename this macro to a different name to be able to use it.  WOW has a global object called PVP that is referenced instead of this macro."] = true
 L["Could not find sequence %s to create a macro for."] = true
 L["Could not find sequence %s."] = true
+L["%s will not fit in a macro: KeyPress and KeyRelease use %d of the 255 characters, leaving %d per step, but the longest step needs %d (%s). Shorten KeyPress or split the sequence or those steps will be cut off and never run."] = true
+L["Reset modifier %s is not available inside a macro and has been ignored."] = true

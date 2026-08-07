@@ -137,18 +137,22 @@ Statics.LoopPriorityImplementation = [[
   end
 ]]
 
+--- Injected into the OnClick snippet when DebugPrintModConditionsOnKeyPress is
+--    set. This runs in the secure restricted environment, which only exposes a
+--    small whitelist of functions - the side-specific modifier calls
+--    (IsLeftAltKeyDown, IsRightControlKeyDown and friends) are not in it. They
+--    used to be called here, so the very first line raised "attempt to call a
+--    nil value" and killed the whole snippet before it reached the line that
+--    sets macrotext. Every sequence then clicked with an empty macro and cast
+--    nothing at all, with no error shown anywhere.
+--    Only the side-agnostic calls are safe, and every value is stringified in
+--    case the restricted environment returns nil.
 Statics.PrintKeyModifiers = [[
-print("Right alt key " .. tostring(IsRightAltKeyDown()))
-print("Left alt key " .. tostring(IsLeftAltKeyDown()))
-print("Any alt key " .. tostring(IsAltKeyDown()))
-print("Right ctrl key " .. tostring(IsRightControlKeyDown()))
-print("Left ctrl key " .. tostring(IsLeftControlKeyDown()))
-print("Any ctrl key " .. tostring(IsControlKeyDown()))
-print("Right shft key " .. tostring(IsRightShiftKeyDown()))
-print("Left shft key " .. tostring(IsLeftShiftKeyDown()))
-print("Any shft key " .. tostring(IsShiftKeyDown()))
-print("Any mod key " .. tostring(IsModifierKeyDown()))
-print("GetMouseButtonClicked() " .. GetMouseButtonClicked() )
+print("alt " .. tostring(IsAltKeyDown()))
+print("ctrl " .. tostring(IsControlKeyDown()))
+print("shift " .. tostring(IsShiftKeyDown()))
+print("any mod " .. tostring(IsModifierKeyDown()))
+print("button " .. tostring(GetMouseButtonClicked()))
 ]]
 
 Statics.OnClick = [=[
@@ -163,6 +167,7 @@ loopiter = tonumber(loopiter)
 looplimit = tonumber(looplimit)
 step = tonumber(step)
 self:SetAttribute('macrotext', self:GetAttribute('KeyPress') .. "\n" .. macros[step] .. "\n" .. self:GetAttribute('KeyRelease'))
+self:SetAttribute('gsemacroset', (self:GetAttribute('gsemacroset') or 0) + 1)
 %s
 if not step or not macros[step] then -- User attempted to write a step method that doesn't work, reset to 1
   print('|cffff0000Invalid step assigned by custom step sequence', self:GetName(), step or 'nil', '|r')

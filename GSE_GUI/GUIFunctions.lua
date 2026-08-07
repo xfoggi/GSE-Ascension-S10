@@ -115,8 +115,8 @@ function GSE.getSequenceName()
   local names1 = GSE.GetSequenceNames()
   local numberOfSeqs = 0
   local currentSpecID, specname, specicon = GSE.GetCurrentSpecID()
-  local newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname))
-  local newSeqName = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname))
+  local newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname))
+  local newSeqName = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname))
   local newSeqNumber=numberOfSeqs+1
   if not GSE.isEmpty(GSELibrary[0]) then
     numberOfSeqs = 0
@@ -137,27 +137,27 @@ function GSE.getSequenceName()
     end
   end
   newSeqNumber=numberOfSeqs+1
-  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
-  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
+  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
+  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
   for k,v in GSE.pairsByKeys(names1) do
     local elements = GSE.split(k, ",")
     local classid = tonumber(elements[1])
     local sequencename = elements[2]
 	if newSeqNameTemp == sequencename then
 	  newSeqNumber=numberOfSeqs+1
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
+	  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
+	  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
 	end
   end
   for name, sequence in pairs(GSELibrary[GSE.GetCurrentClassID()] or {}) do
     if newSeqNameTemp == name then
 	  newSeqNumber = numberOfSeqs+1
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
-	  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
+	  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters("New"..specname..newSeqNumber..GetTime()))
+	  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
 	end
   end
-  newSeqNameTemp = GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
-  newSeqName =  GSE.TrimWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
+  newSeqNameTemp = GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
+  newSeqName =  GSE.StripWhiteSpace(GSE.LowerAndReplaceSpecialCharacters(newSeqNameTemp))
   return newSeqName
 end
 
@@ -195,8 +195,15 @@ function GSE.GUIUpdateSequenceDefinition(classid, SequenceName, sequence)
       local vals = {}
       vals.action = "Replace"
       vals.sequencename = SequenceName
-      vals.sequence = sequence
+      -- Snapshot it. The queue is drained up to a second later, and this used
+      -- to hand over the editor's live table by reference: anything the editor
+      -- did in the meantime - closing, switching version tab, redrawing - was
+      -- still landing in what got stored.
+      vals.sequence = GSE.CloneSequence(sequence, true)
       vals.classid = classid
+      for k,v in ipairs(vals.sequence.MacroVersions or {}) do
+        GSE.LogToFile("queued Replace " .. SequenceName .. " v" .. k .. ": " .. GSE.DescribeMacroVersion(v))
+      end
       table.insert(GSE.OOCQueue, vals)
       GSE.GUIEditFrame:SetStatusText(string.format(L["Sequence %s saved."], SequenceName))
     end

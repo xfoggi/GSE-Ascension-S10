@@ -2,7 +2,7 @@
 ## Title: GSE
 ## Notes: Allows you to execute a sequence of macros without stopping on unusable spells.  Spell and class data generated for Project Ascension Season 10.
 ## Author: TimothyLuke, Gummed, cerberus
-## Version: 2204-wotlk-s10
+## Version: 2205-wotlk-s10
 ## SavedVariables: GSEOptions GSELibrary
 ## OptionalDeps: WeakAuras
 

@@ -283,3 +283,68 @@ function GSE.LoadWeakauras(str)
     WeakAuras.ImportString(str)
   end
 end
+
+
+--- Hidden tooltip used to scrape spell details the API does not expose directly.
+local scantip
+
+local function getScanTooltip()
+  if not scantip then
+    scantip = CreateFrame("GameTooltip", "GSESpellScanTooltip", UIParent, "GameTooltipTemplate")
+    scantip:SetOwner(UIParent, "ANCHOR_NONE")
+  end
+  return scantip
+end
+
+--- Write the character's whole spellbook to GSEOptions.SpellDump.
+-- The launcher's CharacterAdvancementData.json lags the live server by months
+-- and Ascension generates abilities per character anyway, so the running client
+-- is the only source that is both current and specific to this character.
+-- Names, cast times and the full tooltip (which carries the cooldown) all come
+-- straight from the API. Run /gse dumpspells, then /reload to flush it to disk.
+function GSE.DumpSpellbook()
+  -- Stored in GSEOptions: a name added to ## SavedVariables is not picked up by
+  -- this client, so a dedicated global would never reach disk.
+  GSEOptions.SpellDump = {}
+  local GSESpellDump = GSEOptions.SpellDump
+  local tip = getScanTooltip()
+
+  table.insert(GSESpellDump, string.format("%s level %s - %s spell tabs",
+    tostring(GSE.GetCharacterName()), tostring(UnitLevel("player")), tostring(GetNumSpellTabs())))
+
+  local total = 0
+  for tab = 1, GetNumSpellTabs() do
+    local tabname, _, offset, numSpells = GetSpellTabInfo(tab)
+    table.insert(GSESpellDump, "== tab: " .. tostring(tabname) .. " (" .. tostring(numSpells) .. ")")
+    for i = (offset or 0) + 1, (offset or 0) + (numSpells or 0) do
+      local name, rank = GetSpellName(i, BOOKTYPE_SPELL)
+      if name then
+        total = total + 1
+        local _, _, _, cost, _, _, castTime, minRange, maxRange = GetSpellInfo(name)
+
+        tip:ClearLines()
+        tip:SetSpell(i, BOOKTYPE_SPELL)
+        local detail = {}
+        for line = 1, tip:NumLines() do
+          for _, side in ipairs({"Left", "Right"}) do
+            local fs = _G["GSESpellScanTooltipText" .. side .. line]
+            local text = fs and fs:GetText()
+            if text and text ~= "" then
+              table.insert(detail, text)
+            end
+          end
+        end
+
+        table.insert(GSESpellDump, string.format("%s%s | cast=%s cost=%s range=%s-%s | %s",
+          name,
+          (rank and rank ~= "" and (" [" .. rank .. "]") or ""),
+          tostring(castTime), tostring(cost),
+          tostring(minRange), tostring(maxRange),
+          table.concat(detail, " ~ ")))
+      end
+    end
+  end
+
+  GSE.Print(string.format("Spellbook dumped: %d spells. Use /reload to write it to disk.", total))
+  return total
+end

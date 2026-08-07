@@ -220,7 +220,11 @@ function GSE.StripControlandExtendedCodes( str )
     elseif str:byte(i) == 10 then -- leave line breaks unix style
       s = s .. str:sub(i,i)
     elseif str:byte(i) == 13 then -- leave line breaks windows style
-      s = s .. str:sub(i, str:byte(10))
+      -- This read str:sub(i, str:byte(10)): the *byte value* of the tenth
+      -- character used as an end index. On text pasted with CRLF endings that
+      -- copied a hundred-odd character block back into the output for every
+      -- carriage return.
+      s = s .. str:sub(i, i)
     elseif str:byte(i) >= 128 then -- extended characters including accented characters for intenational languages
       s = s .. str:sub(i,i)
     else -- convert everything else to whitespace
@@ -230,7 +234,17 @@ function GSE.StripControlandExtendedCodes( str )
   return s
 end
 
+--- Remove leading and trailing whitespace.
+--    This used to run string.gsub(str, '%s', '') first, which deletes *every*
+--    space and newline in the string rather than trimming the ends. Import ran
+--    the pasted sequence through it, so the Lua still parsed - whitespace is
+--    insignificant between tokens - but every string literal came out mangled:
+--    "/cast Grave March" was imported as "/castGraveMarch".
 function GSE.TrimWhiteSpace(str)
-  local str1=string.gsub(str, '%s', '');
-  return (string.gsub(str1, "^%s*(.-)%s*$", "%1"))
+  return (string.gsub(str, "^%s*(.-)%s*$", "%1"))
+end
+
+--- Delete all whitespace. For building identifiers, not for trimming input.
+function GSE.StripWhiteSpace(str)
+  return (string.gsub(str, "%s", ""))
 end

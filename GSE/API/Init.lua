@@ -73,6 +73,45 @@ function GSE.PrintDebugMessage(message, module)
     end
 end
 
+--- Append a line to the GSE debug log kept in GSEOptions.DebugLog.
+-- WoW Lua cannot write files, and the chat frame is not captured by /chatlog,
+-- so diagnostics that need to be read outside the game have to ride out in
+-- saved variables. The log is flushed on reload or logout like any other saved
+-- variable and is capped so it cannot grow without bound.
+-- Wipe it with /gse clearlog.
+function GSE.LogToFile(message)
+  -- Deliberately inside GSEOptions rather than a GSEDebugLog global of its own.
+  -- Adding a name to ## SavedVariables does not take on this client - two
+  -- separate variables declared that way were never written to disk - while
+  -- GSEOptions has always persisted.
+  if type(GSEOptions) ~= "table" then
+    return
+  end
+  if type(GSEOptions.DebugLog) ~= "table" then
+    GSEOptions.DebugLog = {}
+  end
+  table.insert(GSEOptions.DebugLog, date("%Y-%m-%d %H:%M:%S") .. "  " .. tostring(message))
+  while table.getn(GSEOptions.DebugLog) > 500 do
+    table.remove(GSEOptions.DebugLog, 1)
+  end
+end
+
+--- One-line summary of a macro version, for GSE.LogToFile.
+function GSE.DescribeMacroVersion(macroversion)
+  if type(macroversion) ~= "table" then
+    return "<" .. type(macroversion) .. ">"
+  end
+  local function count(t)
+    if type(t) ~= "table" then return "nil" end
+    return tostring(table.getn(t))
+  end
+  return string.format("lines=%s KeyPress=%s PreMacro=%s KeyRelease=%s PostMacro=%s Step=%s",
+    tostring(table.getn(macroversion)),
+    count(macroversion.KeyPress), count(macroversion.PreMacro),
+    count(macroversion.KeyRelease), count(macroversion.PostMacro),
+    tostring(macroversion.StepFunction))
+end
+
 GSE.CurrentGCD = GetSpellCooldown(61304)
 GSE.RecorderActive = false
 

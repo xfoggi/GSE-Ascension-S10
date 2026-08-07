@@ -678,6 +678,27 @@ function GSE.OOCUpdateSequence(name,sequence)
     GSE.PrintDebugMessage("GSUpdateSequence KeyPress updated to: " .. gsebutton:GetAttribute('KeyPress'))
     gsebutton:SetAttribute('KeyRelease',table.concat(GSE.PrepareKeyRelease(tempseq), "\n") or '' .. '\n')
     GSE.PrintDebugMessage("GSUpdateSequence KeyRelease updated to: " .. gsebutton:GetAttribute('KeyRelease'))
+
+    -- Each click builds one macro out of KeyPress, the current step and
+    -- KeyRelease. WoW truncates macro text at 255 characters and says nothing,
+    -- so a long KeyPress quietly eats the step's /cast off the end - KeyPress
+    -- keeps working while the rotation appears to do nothing at all.
+    local overhead = string.len(gsebutton:GetAttribute('KeyPress') or "")
+      + string.len(gsebutton:GetAttribute('KeyRelease') or "") + 2
+    local longest, longestline = 0, ""
+    for _, line in ipairs(executionseq) do
+      if string.len(line) > longest then
+        longest, longestline = string.len(line), line
+      end
+    end
+    if overhead + longest > 255 then
+      GSE.Print(string.format(
+        L["%s will not fit in a macro: KeyPress and KeyRelease use %d of the 255 characters, leaving %d per step, but the longest step needs %d (%s). Shorten KeyPress or split the sequence or those steps will be cut off and never run."],
+        name, overhead, 255 - overhead, longest, longestline), GNOME)
+      GSE.LogToFile(string.format("%s macro overflow: overhead=%d longest step=%d (%s)",
+        name, overhead, longest, longestline))
+    end
+
     if existingbutton then
       gsebutton:UnwrapScript(gsebutton,'OnClick')
     end
@@ -718,6 +739,83 @@ function GSE.PrepareStepFunction(stepper, looper)
 end
 
 --- This funciton dumps what is currently running on an existing button.
+--- Report what a sequence's button is actually executing.
+--    GSE.DebugDumpButton shows the definition; this shows the live button - the
+--    execution list the loop walks, where the loop bounds sit, which step is
+--    current and the exact macro text the next click will run. That is the only
+--    view that distinguishes "the step never comes up" from "the step comes up
+--    and the spell refuses to cast".
+function GSE.DumpButtonState(SequenceName)
+  if GSE.isEmpty(SequenceName) then
+    GSE.Print("Usage: /gse dumpbutton <sequence name>", GNOME)
+    return
+  end
+  local button = _G[SequenceName]
+  if not button then
+    GSE.Print(string.format("No button exists for %s. The macro was never built.", SequenceName), GNOME)
+    GSE.LogToFile("dumpbutton " .. SequenceName .. ": no button")
+    return
+  end
+
+  local function attr(name)
+    return tostring(button:GetAttribute(name))
+  end
+
+  local header = string.format(
+    "dumpbutton %s: step=%s loopstart=%s loopstop=%s loopiter=%s looplimit=%s",
+    SequenceName, attr('step'), attr('loopstart'), attr('loopstop'),
+    attr('loopiter'), attr('looplimit'))
+  GSE.Print(header, GNOME)
+  GSE.LogToFile(header)
+
+  local exec = GSE.SequencesExec[SequenceName]
+  if type(exec) == "table" then
+    GSE.Print(string.format("  execution list: %d entries, current step holds: %s",
+      table.getn(exec), tostring(exec[tonumber(button:GetAttribute('step')) or 0])), GNOME)
+    for i, line in ipairs(exec) do
+      GSE.LogToFile(string.format("  exec[%d] = %s", i, tostring(line)))
+    end
+  else
+    GSE.Print("  execution list is missing", GNOME)
+    GSE.LogToFile("  exec list missing")
+  end
+
+  -- The macro the next click will run. KeyPress, the step and KeyRelease all
+  -- live in this one string, so if the step's /cast is absent here it is either
+  -- past the 255 character cut or the step never resolved.
+  local clicked = tonumber(button:GetAttribute('gseclicked')) or 0
+  local macroset = tonumber(button:GetAttribute('gsemacroset')) or 0
+  GSE.Print(string.format("  clicks seen: %d, macro written: %d times", clicked, macroset), GNOME)
+  if clicked == 0 then
+    GSE.Print("  the button has not been clicked since it was built - press the macro once, then run this again", GNOME)
+  elseif macroset < clicked then
+    GSE.Print("  the OnClick snippet is dying before it writes the macro", GNOME)
+  end
+  GSE.Print(string.format("  KeyPress %d chars, KeyRelease %d chars",
+    string.len(button:GetAttribute('KeyPress') or ""),
+    string.len(button:GetAttribute('KeyRelease') or "")), GNOME)
+
+  local macrotext = button:GetAttribute('macrotext') or ""
+  GSE.Print(string.format("  macrotext is %d chars:", string.len(macrotext)), GNOME)
+  for _, line in ipairs(GSE.SplitMeIntolines(macrotext)) do
+    GSE.Print("    " .. line, GNOME)
+  end
+
+  -- And the macro on the action bar, which has to be /click <SequenceName>.
+  local index = GetMacroIndexByName(SequenceName)
+  if index and index > 0 then
+    GSE.Print("  action bar macro: " .. tostring(GetMacroBody(index)), GNOME)
+    GSE.LogToFile("  macro body = " .. tostring(GetMacroBody(index)))
+  else
+    GSE.Print("  no action bar macro named " .. SequenceName .. " exists", GNOME)
+    GSE.LogToFile("  no macro stub")
+  end
+
+  GSE.LogToFile("  KeyPress = " .. attr('KeyPress'))
+  GSE.LogToFile("  KeyRelease = " .. attr('KeyRelease'))
+  GSE.LogToFile("  macrotext = " .. macrotext)
+end
+
 function GSE.DebugDumpButton(SequenceName)
   local targetreset = ""
   local classid = GSE.FindSequenceClassID(SequenceName)
@@ -1412,13 +1510,29 @@ function GSE.GetMacroResetImplementation()
     GSE.resetMacroResetModifiers()
   end
 
+  -- These land in the OnClick snippet, which runs in the secure restricted
+  -- environment. Only the side-agnostic modifier calls exist there, so
+  -- "LeftControl" cannot become IsLeftControlKeyDown() - that is a nil call
+  -- that kills the snippet before it sets macrotext, and the sequence then
+  -- casts nothing whatsoever. Map the sided names onto the call that does
+  -- exist, and AnyMod onto IsModifierKeyDown.
+  local restrictedModifier = {
+    Shift = "IsShiftKeyDown", LeftShift = "IsShiftKeyDown", RightShift = "IsShiftKeyDown",
+    Control = "IsControlKeyDown", LeftControl = "IsControlKeyDown", RightControl = "IsControlKeyDown",
+    Alt = "IsAltKeyDown", LeftAlt = "IsAltKeyDown", RightAlt = "IsAltKeyDown",
+    AnyMod = "IsModifierKeyDown",
+  }
+
   for k,v in pairs(GSEOptions.MacroResetModifiers) do
     if v == true then
-      flagactive = true
       if string.find(k, "Button") then
+        flagactive = true
         table.insert(activemods, "GetMouseButtonClicked() == \"".. k .. "\"")
+      elseif restrictedModifier[k] then
+        flagactive = true
+        table.insert(activemods, restrictedModifier[k] .. "() == true")
       else
-        table.insert (activemods, "Is" .. k .. "KeyDown() == true" )
+        GSE.Print(string.format(L["Reset modifier %s is not available inside a macro and has been ignored."], k), GNOME)
       end
     end
   end
@@ -1431,7 +1545,13 @@ end
 
 --- This funcion returns the actual onclick implementation
 function GSE.PrepareOnClickImplementation(sequence)
-  local returnstring = (GSEOptions.DebugPrintModConditionsOnKeyPress and Statics.PrintKeyModifiers or "" )
+  -- Two counters bracket the parts that can fail. gseclicked is bumped before
+  -- anything else, gsemacroset right after macrotext is written. A snippet that
+  -- raises an error stops dead and shows nothing anywhere, so comparing the two
+  -- is the only way to tell "the button was never clicked" from "the click ran
+  -- but died on the way to setting the macro".
+  local returnstring = "self:SetAttribute('gseclicked', (self:GetAttribute('gseclicked') or 0) + 1)\n"
+  returnstring = returnstring .. (GSEOptions.DebugPrintModConditionsOnKeyPress and Statics.PrintKeyModifiers or "" )
   returnstring = returnstring .. GSE.GetMacroResetImplementation()
   returnstring = returnstring  .. format(Statics.OnClick, GSE.PrepareStepFunction(sequence.StepFunction,  GSE.IsLoopSequence(sequence)))
   return returnstring

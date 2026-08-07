@@ -392,6 +392,16 @@ function GSE:GSSlash(input)
     end
   elseif string.lower(input) == "cleancorrupted" then
     GSE.CleanCorruptedSequences()
+  elseif string.lower(string.sub(input, 1, 10)) == "dumpbutton" then
+    GSE.DumpButtonState(GSE.TrimWhiteSpace(string.sub(input, 11)))
+  elseif string.lower(input) == "dumpspells" then
+    local ok, err = pcall(GSE.DumpSpellbook)
+    if not ok then
+      GSE.Print("Spellbook dump failed: " .. tostring(err), GNOME)
+    end
+  elseif string.lower(input) == "clearlog" then
+    GSEOptions.DebugLog = {}
+    GSE.Print("GSE debug log cleared.", GNOME)
   else
     GSE.GUIShowViewer()
   end
@@ -464,6 +474,10 @@ function GSE:ProcessOOCQueue()
           -- Always save the sequence directly
           GSELibrary[v.classid][v.sequencename] = v.sequence
           GSE.Print("Saved sequence: " .. v.sequencename .. " for class " .. v.classid)
+          for i,mv in ipairs(GSELibrary[v.classid][v.sequencename].MacroVersions or {}) do
+            GSE.LogToFile("stored " .. v.sequencename .. " class " .. tostring(v.classid)
+              .. " v" .. i .. ": " .. GSE.DescribeMacroVersion(mv))
+          end
           
           if not GSE.isEmpty(v.sequence) and not GSE.isEmpty(v.sequence.MacroVersions) then
             local activeVersion = v.sequence.Default or 1
