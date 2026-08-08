@@ -631,8 +631,24 @@ function GSE:GUIDrawMacroEditor(container, version)
   end
   looplimit.editbox:SetNumeric()
   looplimit:SetCallback("OnTextChanged", function (sel, object, value)
+    if editframe.releasing then return end
     editframe.Sequence.MacroVersions[version].LoopLimit = value
   end)
+
+  local spacerlabelthrottle = AceGUI:Create("Label")
+  spacerlabelthrottle:SetWidth(5)
+  linegroup1:AddChild(spacerlabelthrottle)
+
+  local channelhold = AceGUI:Create("CheckBox")
+  channelhold:SetLabel(L["Hold while channelling"])
+  channelhold:SetType("checkbox")
+  channelhold:SetWidth(200)
+  channelhold:SetValue(editframe.Sequence.MacroVersions[version].ChannelHold ~= false)
+  channelhold:SetCallback("OnValueChanged", function (sel, object, value)
+    if editframe.releasing then return end
+    editframe.Sequence.MacroVersions[version].ChannelHold = value
+  end)
+  linegroup1:AddChild(channelhold)
 
   local spacerlabel7 = AceGUI:Create("Label")
   spacerlabel7:SetWidth(5)
@@ -756,6 +772,7 @@ function GSE:GUIDrawMacroEditor(container, version)
     version = version,
     StepFunction = stepdropdown,
     LoopLimit = looplimit,
+    ChannelHold = channelhold,
     KeyPress = KeyPressbox,
     PreMacro = PreMacro,
     Sequence = spellbox,
@@ -933,6 +950,8 @@ function GSE.GUICommitMacroEditor()
   else
     macroversion.LoopLimit = limit
   end
+
+  macroversion.ChannelHold = widgets.ChannelHold:GetValue() and true or false
 
   -- Replace the numbered lines. Count first: clearing them inside an ipairs
   -- over the same table stops the iteration at the first hole.

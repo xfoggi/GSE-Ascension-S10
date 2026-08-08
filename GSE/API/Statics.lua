@@ -138,15 +138,15 @@ Statics.LoopPriorityImplementation = [[
 ]]
 
 --- Injected into the OnClick snippet when DebugPrintModConditionsOnKeyPress is
---    set. This runs in the secure restricted environment, which only exposes a
---    small whitelist of functions - the side-specific modifier calls
---    (IsLeftAltKeyDown, IsRightControlKeyDown and friends) are not in it. They
---    used to be called here, so the very first line raised "attempt to call a
---    nil value" and killed the whole snippet before it reached the line that
---    sets macrotext. Every sequence then clicked with an empty macro and cast
---    nothing at all, with no error shown anywhere.
---    Only the side-agnostic calls are safe, and every value is stringified in
---    case the restricted environment returns nil.
+--    set, so it runs in the secure restricted environment.
+--    The last line used to be  print("..." .. GetMouseButtonClicked()), with no
+--    tostring. GetMouseButtonClicked returns nil whenever the snippet runs
+--    outside a mouse click, and concatenating nil raises an error. A snippet
+--    that errors stops dead, so it never reached the line that sets macrotext:
+--    the sequence then clicked with an empty macro and cast nothing at all,
+--    silently. Everything is stringified now.
+--    The modifier calls, including the sided ones, are all present in
+--    FrameXML/RestrictedEnvironment.lua - they were never the problem.
 Statics.PrintKeyModifiers = [[
 print("alt " .. tostring(IsAltKeyDown()))
 print("ctrl " .. tostring(IsControlKeyDown()))
@@ -166,9 +166,26 @@ loopstop = tonumber(loopstop)
 loopiter = tonumber(loopiter)
 looplimit = tonumber(looplimit)
 step = tonumber(step)
+-- Channel hold. Any /cast issued during a channel cancels it, so spamming a
+-- sequence that contains a channelled spell means the channel never completes
+-- a single tick. PlayerIsChanneling is one of the few pieces of player state
+-- the restricted environment exposes (see FrameXML/RestrictedEnvironment.lua),
+-- so the snippet can see this and stand down: while a channel is running the
+-- macro is built from KeyPress and KeyRelease only, no /cast is re-issued and
+-- the step stays where it is.
+-- There is no equivalent for ordinary casts - the environment offers no
+-- PlayerIsCasting and no GetTime, so a time based throttle is not possible.
+local hold = false
+if self:GetAttribute('gsechannelhold') and PlayerIsChanneling and PlayerIsChanneling() then
+  hold = true
+end
+if hold then
+  self:SetAttribute('macrotext', self:GetAttribute('KeyPress') .. "\n" .. self:GetAttribute('KeyRelease'))
+else
 self:SetAttribute('macrotext', self:GetAttribute('KeyPress') .. "\n" .. macros[step] .. "\n" .. self:GetAttribute('KeyRelease'))
 self:SetAttribute('gsemacroset', (self:GetAttribute('gsemacroset') or 0) + 1)
 %s
+end
 if not step or not macros[step] then -- User attempted to write a step method that doesn't work, reset to 1
   print('|cffff0000Invalid step assigned by custom step sequence', self:GetName(), step or 'nil', '|r')
   step = 1

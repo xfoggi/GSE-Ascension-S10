@@ -674,6 +674,9 @@ function GSE.OOCUpdateSequence(name,sequence)
 
     gsebutton:Execute('name, macros = self:GetName(), newtable([=======[' .. strjoin(']=======],[=======[', unpack(executionseq)) .. ']=======])')
     gsebutton:SetAttribute("step",1)
+    -- Stand down while a channel is running rather than cancelling it. On by
+    -- default: clipping your own channel is never what you wanted.
+    gsebutton:SetAttribute('gsechannelhold', tempseq.ChannelHold ~= false)
     gsebutton:SetAttribute('KeyPress',table.concat(GSE.PrepareKeyPress(tempseq), "\n") or '' .. '\n')
     GSE.PrintDebugMessage("GSUpdateSequence KeyPress updated to: " .. gsebutton:GetAttribute('KeyPress'))
     gsebutton:SetAttribute('KeyRelease',table.concat(GSE.PrepareKeyRelease(tempseq), "\n") or '' .. '\n')
@@ -691,12 +694,20 @@ function GSE.OOCUpdateSequence(name,sequence)
         longest, longestline = string.len(line), line
       end
     end
-    if overhead + longest > 255 then
-      GSE.Print(string.format(
-        L["%s will not fit in a macro: KeyPress and KeyRelease use %d of the 255 characters, leaving %d per step, but the longest step needs %d (%s). Shorten KeyPress or split the sequence or those steps will be cut off and never run."],
-        name, overhead, 255 - overhead, longest, longestline), GNOME)
-      GSE.LogToFile(string.format("%s macro overflow: overhead=%d longest step=%d (%s)",
-        name, overhead, longest, longestline))
+    -- Buttons are rebuilt on every reload, zone change and spec check, so warn
+    -- only when the verdict for this sequence actually changes. Otherwise the
+    -- chat fills up with the same line for every sequence, forever.
+    GSE.MacroOverflowState = GSE.MacroOverflowState or {}
+    local state = overhead + longest > 255 and (overhead .. ":" .. longest) or nil
+    if state ~= GSE.MacroOverflowState[name] then
+      GSE.MacroOverflowState[name] = state
+      if state then
+        GSE.Print(string.format(
+          L["%s does not fit in a macro. KeyPress and KeyRelease already use %d of the 255 characters WoW allows, so the step's own line is cut off and never runs. Shorten KeyPress, or turn off Prevent Sound Errors, which adds about 220 on its own."],
+          name, overhead), GNOME)
+        GSE.LogToFile(string.format("%s macro overflow: overhead=%d longest step=%d (%s)",
+          name, overhead, longest, longestline))
+      end
     end
 
     if existingbutton then
@@ -762,9 +773,9 @@ function GSE.DumpButtonState(SequenceName)
   end
 
   local header = string.format(
-    "dumpbutton %s: step=%s loopstart=%s loopstop=%s loopiter=%s looplimit=%s",
+    "dumpbutton %s: step=%s loopstart=%s loopstop=%s loopiter=%s looplimit=%s channelhold=%s",
     SequenceName, attr('step'), attr('loopstart'), attr('loopstop'),
-    attr('loopiter'), attr('looplimit'))
+    attr('loopiter'), attr('looplimit'), attr('gsechannelhold'))
   GSE.Print(header, GNOME)
   GSE.LogToFile(header)
 
@@ -1511,15 +1522,16 @@ function GSE.GetMacroResetImplementation()
   end
 
   -- These land in the OnClick snippet, which runs in the secure restricted
-  -- environment. Only the side-agnostic modifier calls exist there, so
-  -- "LeftControl" cannot become IsLeftControlKeyDown() - that is a nil call
-  -- that kills the snippet before it sets macrotext, and the sequence then
-  -- casts nothing whatsoever. Map the sided names onto the call that does
-  -- exist, and AnyMod onto IsModifierKeyDown.
+  -- environment. Every sided modifier call is present there (see
+  -- FrameXML/RestrictedEnvironment.lua), so "LeftControl" -> IsLeftControlKeyDown
+  -- is fine. "AnyMod" is the exception: there is no IsAnyModKeyDown, and a nil
+  -- call kills the snippet before it sets macrotext, leaving the sequence
+  -- clicking an empty macro. Name the calls explicitly rather than building
+  -- them from the key.
   local restrictedModifier = {
-    Shift = "IsShiftKeyDown", LeftShift = "IsShiftKeyDown", RightShift = "IsShiftKeyDown",
-    Control = "IsControlKeyDown", LeftControl = "IsControlKeyDown", RightControl = "IsControlKeyDown",
-    Alt = "IsAltKeyDown", LeftAlt = "IsAltKeyDown", RightAlt = "IsAltKeyDown",
+    Shift = "IsShiftKeyDown", LeftShift = "IsLeftShiftKeyDown", RightShift = "IsRightShiftKeyDown",
+    Control = "IsControlKeyDown", LeftControl = "IsLeftControlKeyDown", RightControl = "IsRightControlKeyDown",
+    Alt = "IsAltKeyDown", LeftAlt = "IsLeftAltKeyDown", RightAlt = "IsRightAltKeyDown",
     AnyMod = "IsModifierKeyDown",
   }
 
