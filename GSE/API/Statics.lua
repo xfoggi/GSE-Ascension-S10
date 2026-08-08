@@ -180,7 +180,11 @@ if self:GetAttribute('gsechannelhold') and PlayerIsChanneling and PlayerIsChanne
   hold = true
 end
 if hold then
-  self:SetAttribute('macrotext', self:GetAttribute('KeyPress') .. "\n" .. self:GetAttribute('KeyRelease'))
+  -- KeyPress minus anything that can start a cast. Leaving KeyPress whole would
+  -- let a priority spender fire mid channel and cancel the very thing this is
+  -- protecting; dropping it entirely would stop /startattack and leave the
+  -- button doing nothing at all whenever the client reports a channel.
+  self:SetAttribute('macrotext', self:GetAttribute('KeyPressSafe') or '')
 else
 self:SetAttribute('macrotext', self:GetAttribute('KeyPress') .. "\n" .. macros[step] .. "\n" .. self:GetAttribute('KeyRelease'))
 self:SetAttribute('gsemacroset', (self:GetAttribute('gsemacroset') or 0) + 1)

@@ -1,4 +1,4 @@
--- Animation Necromancer - dungeon rotation, level 25
+-- Animation Necromancer - dungeon rotation, level 25+
 --
 -- This file is NOT listed in GSE.toc, so the game never loads it. Paste the
 -- block below into /gse -> Import.
@@ -7,72 +7,76 @@
 -- /gse dumpspells, not from the launcher's CharacterAdvancementData.json, which
 -- lags the live server by months and disagrees with nearly every name here.
 --
--- Everything except /startattack lives in the sequence, not in KeyPress.
--- KeyPress runs ahead of the step's line on every single press, and in practice
--- one /cast there was enough to stop the step's spell going off at all. Steps
--- do not have that problem: a step whose spell is not ready costs almost
--- nothing, because the next press is milliseconds away and carries the next
--- step. It also keeps the macro far below the 255 character cut - KeyPress is
--- 12 characters here, so the worst case is 51.
+-- Why it is shaped like this, in the order the lessons were learned:
 --
--- The economy this is built around:
---   Runic Power generators  Lichfrost (2.27s cast), Crypt Swarm (channel),
---                           Glacial Tap (30 RP instant, 12s cooldown)
---   Runic Power spenders    Command: Undead 30, Corpse Explosion 40,
---                           Harvest Plague 20
+-- PreMacro and PostMacro are empty ON PURPOSE. GSE.IsLoopSequence flips the
+-- step function to its looping variant as soon as either holds a line, or when
+-- Inner Loop Limit is set, and the looping variant of Priority collapses into
+-- plain sequential walking after roughly twenty presses. Leave all three empty
+-- and Priority keeps its weighting permanently:
+--
+--   Command: Undead           28.6% of presses
+--   Harvest Plague            23.8%
+--   Corpse Explosion          19.0%
+--   Crypt Swarm               14.3%
+--   Animate: Skeletal Archer   9.5%
+--   Unholy Frenzy              4.8%
+--
+-- Nothing that costs Runic Power may go in KeyPress. A spell on cooldown
+-- reports itself unusable and the macro moves to the next line, but a spell you
+-- merely cannot afford still counts as usable: it claims the single cast that
+-- press allowed, errors, and everything below it - the step included - never
+-- runs. Since the step is where Crypt Swarm lives, and Crypt Swarm is the only
+-- source of Runic Power, that is not a stall but a deadlock. Every spender
+-- therefore sits in the sequence, where each has its own press and can block
+-- nothing.
+--
+-- KeyPress holds only what is free: /startattack, and Grave March, which costs
+-- nothing, has a 2 second cooldown and is flagged usable while casting or
+-- channelling, so it can neither block nor clip.
+--
+-- Hold while channelling is on, so a Crypt Swarm channel runs to the end
+-- instead of being cancelled by the next press.
+--
+-- Worst case macro: 91 of the 255 characters WoW allows.
 --
 -- On their own keys, deliberately not in here:
---   /cast !Crypt Swarm          channelled, and 3.3.5 has no [channeling]
---                               conditional to stop the next step cancelling it
---   /cast Bone Ward             30 minute buff; in KeyRelease with [nocombat]
---                               it fires on every press while out of combat and
---                               jams the whole rotation
---   /cast Grave March           re-point the minions when you swap target
+--   /cast Undead: Assault   minion stance, set once before the pull
+--   /cast Bone Ward         30 minute buff
+--   /cast Raise: ...        summons, cast when a minion actually dies
 
-Sequences['NecroAnimDungeon'] = {
+Sequences['NecroPrio1'] = {
     Author = "Wearemany@Rexxar - Conquest of Azeroth",
     SpecID = 1251,                      -- Animation - Necromancer (files under class 25)
     Talents = "Animation",
     Default = 1,
     Icon = "Spell_Shadow_AnimateDead",
-    Help = "Animation Necromancer, level 25, 5-man. Lichfrost builds Runic Power, Command: Undead spends it. Crypt Swarm, Bone Ward and Grave March go on their own keys.",
+    Help = "Animation Necromancer, level 25+. Priority weighted: spenders first, Crypt Swarm tops the Runic Power back up. PreMacro and PostMacro must stay empty or Priority degrades to Sequential.",
     MacroVersions = {
         [1] = {
-            StepFunction = "Sequential",
+            StepFunction = "Priority",
+            ChannelHold = true,
 
             -- Left unset these inherit GSEOptions, where use13 and use14 are on,
             -- and two /use lines appear in KeyRelease that the editor never
-            -- shows you.
+            -- shows you but the 255 character limit still counts.
             Head = false, Neck = false, Belt = false,
             Ring1 = false, Ring2 = false, Trinket1 = false, Trinket2 = false,
 
             KeyPress = {
                 "/startattack",
+                "/cast Grave March",
             },
 
-            -- Once at the start, and again after each combat drop. These fail
-            -- harmlessly at full Life Force, so they only cast for minions that
-            -- actually died.
-            PreMacro = {
-                "/cast Raise: Greater Skeletal Warrior",
-                "/cast Raise: Crypt Fiend",
-                "/cast Raise: Ghoul",
-            },
+            -- Must stay empty: one line here and Priority stops weighting.
+            PreMacro = {},
 
-            -- Twelve steps, Lichfrost on six of them. Everything else waits on
-            -- the Runic Power it generates, so it has to dominate.
-            "/cast Lichfrost",
-            "/cast Animate: Skeletal Archer",
-            "/cast Lichfrost",
             "/cast Command: Undead",
-            "/cast Lichfrost",
-            "/cast Corpse Explosion",
-            "/cast Lichfrost",
             "/cast Harvest Plague",
-            "/cast Lichfrost",
+            "/cast Corpse Explosion",
+            "/cast Crypt Swarm",
+            "/cast Animate: Skeletal Archer",
             "/cast Unholy Frenzy",
-            "/cast Lichfrost",
-            "/cast Command: Undead",
 
             PostMacro = {},
             KeyRelease = {},

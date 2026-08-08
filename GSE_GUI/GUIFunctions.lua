@@ -91,6 +91,10 @@ function GSE.GUILoadEditor(key, incomingframe, recordedstring)
 	GSE.isNewFirstTimeCreated=false
   end
   GSE.GUIEditFrame.SequenceName = sequenceName
+  -- Kept apart from SequenceName, which is wired to an edit box and can be
+  -- blanked by AceGUI releasing that box. Nothing else writes this, so it is
+  -- what a save falls back to rather than failing on an empty name.
+  GSE.GUIEditFrame.LoadedSequenceName = sequenceName
   GSE.GUIEditFrame.Sequence = sequence
   GSE.GUIEditFrame.ClassID = classid
   GSE.GUIEditFrame.Default = sequence.Default or 1

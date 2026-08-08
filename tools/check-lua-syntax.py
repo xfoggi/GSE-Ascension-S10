@@ -33,8 +33,25 @@ def lua_files():
             yield path
 
 
+def lua51_runtime():
+    """Compile against the Lua the game actually runs.
+
+    WoW 3.3.5a is Lua 5.1. lupa bundles several runtimes and LuaRuntime() picks
+    the newest, which happily accepts syntax 5.1 rejects - so a file could pass
+    here and still be refused in game. Ask for 5.1 explicitly and only fall back
+    if this lupa build does not carry it.
+    """
+    try:
+        from lupa import lua51
+        return lua51.LuaRuntime(), "5.1"
+    except ImportError:
+        runtime = lupa.LuaRuntime()
+        return runtime, "%d.%d (5.1 unavailable in this lupa build)" % runtime.lua_version
+
+
 def main():
-    runtime = lupa.LuaRuntime()
+    runtime, luaversion = lua51_runtime()
+    print("checking against Lua %s" % luaversion)
     failures = []
     checked = 0
 

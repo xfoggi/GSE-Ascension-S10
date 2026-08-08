@@ -682,6 +682,21 @@ function GSE.OOCUpdateSequence(name,sequence)
     gsebutton:SetAttribute('KeyRelease',table.concat(GSE.PrepareKeyRelease(tempseq), "\n") or '' .. '\n')
     GSE.PrintDebugMessage("GSUpdateSequence KeyRelease updated to: " .. gsebutton:GetAttribute('KeyRelease'))
 
+    -- KeyPress with everything that could start a cast stripped out. While a
+    -- channel is running the macro is built from this instead, so /startattack
+    -- and the like still run but nothing can cancel the channel. Filtering here
+    -- in ordinary Lua keeps the snippet down to picking one string or the other.
+    local safekeypress = {}
+    for _, line in ipairs(GSE.PrepareKeyPress(tempseq)) do
+      local lowered = string.lower(line)
+      if GSE.isEmpty(string.find(lowered, "/cast", 1, true))
+        and GSE.isEmpty(string.find(lowered, "/use", 1, true))
+        and GSE.isEmpty(string.find(lowered, "/click", 1, true)) then
+        table.insert(safekeypress, line)
+      end
+    end
+    gsebutton:SetAttribute('KeyPressSafe', table.concat(safekeypress, "\n"))
+
     -- Each click builds one macro out of KeyPress, the current step and
     -- KeyRelease. WoW truncates macro text at 255 characters and says nothing,
     -- so a long KeyPress quietly eats the step's /cast off the end - KeyPress
@@ -703,8 +718,8 @@ function GSE.OOCUpdateSequence(name,sequence)
       GSE.MacroOverflowState[name] = state
       if state then
         GSE.Print(string.format(
-          L["%s does not fit in a macro. KeyPress and KeyRelease already use %d of the 255 characters WoW allows, so the step's own line is cut off and never runs. Shorten KeyPress, or turn off Prevent Sound Errors, which adds about 220 on its own."],
-          name, overhead), GNOME)
+          L["%s does not fit in a macro: %d characters against the 255 WoW allows. Everything past the cut is dropped, KeyRelease first and then the step itself. Shorten KeyPress, or turn off Prevent Sound Errors, which adds about 220 on its own."],
+          name, overhead + longest), GNOME)
         GSE.LogToFile(string.format("%s macro overflow: overhead=%d longest step=%d (%s)",
           name, overhead, longest, longestline))
       end
@@ -794,6 +809,10 @@ function GSE.DumpButtonState(SequenceName)
   -- The macro the next click will run. KeyPress, the step and KeyRelease all
   -- live in this one string, so if the step's /cast is absent here it is either
   -- past the 255 character cut or the step never resolved.
+  GSE.Print(string.format("  UnitChannelInfo says: %s   KeyPressSafe: %d chars",
+    tostring(UnitChannelInfo("player") or "not channelling"),
+    string.len(button:GetAttribute('KeyPressSafe') or "")), GNOME)
+
   local clicked = tonumber(button:GetAttribute('gseclicked')) or 0
   local macroset = tonumber(button:GetAttribute('gsemacroset')) or 0
   GSE.Print(string.format("  clicks seen: %d, macro written: %d times", clicked, macroset), GNOME)

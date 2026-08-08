@@ -8,6 +8,167 @@ local libS = LibStub:GetLibrary("AceSerializer-3.0")
 local libC = LibStub:GetLibrary("LibCompress")
 local libCE = libC:GetAddonEncodeTable()
 
+-- Field help. Kept here rather than in a file of its own because this client
+-- only enumerates an add-on's files at startup: a newly added one is reported
+-- as "Error loading" in Logs/FrameXML.log until the game is fully restarted,
+-- and /reload is not enough. Living in a file that already loads avoids that.
+
+--- Translate if the string has been registered, otherwise use it as written.
+--    GSE.L is a non-silent AceLocale table: indexing it with a key nobody
+--    registered returns the key but also fires the error handler every time.
+--    These texts are far too long to carry in every locale file, so ask with
+--    rawget, which does not trip that.
+local function T(text)
+  return rawget(GSE.L, text) or text
+end
+
+--- Help text for the sequence editor's fields, written against how the addon
+--    actually behaves. Several of these are the answer to a problem that cost
+--    a lot of time to find, so the surprises are called out rather than buried.
+local FIELD_HELP = {
+
+  KeyPress = {
+    T("KeyPress"),
+    T("Lines pasted at the top of the macro on EVERY press, ahead of the current step.\n\nNEVER PUT A SPELL HERE THAT COSTS A RESOURCE YOU CAN RUN OUT OF. A spell on cooldown reports itself unusable and the macro moves on to the next line, but a spell you merely cannot afford still counts as usable: it claims the one cast this press allowed, errors, and nothing below it runs - the step included. If the step is where your resource generator lives, that is a deadlock, not a stall.\n\nCooldown-gated abilities are what belongs here. They fire the moment they come up, ahead of the step, which no ordering in the sequence can achieve.\n\nWatch the length. KeyPress, the step's line and KeyRelease become one macro and WoW cuts that at 255 characters without a word. Prevent Sound Errors alone adds about 220."),
+  },
+
+  PreMacro = {
+    T("PreMacro"),
+    T("Extra steps that run once at the start of the sequence, before the loop begins.\n\nThese are steps, not per-press lines: each one costs a press. The button resets when you leave combat, so they run again on every pull.\n\nIMPORTANT: a single line here switches the step function to its looping variant, and the looping variant of Priority collapses into plain sequential walking after about twenty presses. If you are relying on Priority weighting, this box must stay empty."),
+  },
+
+  Sequence = {
+    T("Sequence"),
+    T("The looping list. One line is one step, and exactly one step runs per press.\n\nThe step advances on every press whether or not the spell actually cast, because a macro cannot know. A step whose spell is on cooldown costs one press, and the next press is already trying the next step. Nothing here can block anything else, which is why every spell that costs a resource belongs here rather than in KeyPress.\n\nAt spam speed the pointer laps the whole list several times per global cooldown, so what decides the mix is how many copies of a line you put in, not where you put it."),
+  },
+
+  KeyRelease = {
+    T("KeyRelease"),
+    T("Lines pasted at the bottom of the macro on every press, after the current step.\n\nShares the 255 character budget with KeyPress and the step, and because it sits last it is the first thing cut when the macro overflows.\n\nBe careful with [nocombat] here. Out of combat that condition is true on every press, so an instant spell parked here fires continuously and jams the rest of the rotation."),
+  },
+
+  PostMacro = {
+    T("PostMacro"),
+    T("Steps appended after the loop.\n\nIn a looping sequence these are NEVER REACHED. The loop's end stops short of the end of the list, so the pointer turns back to the start and never walks into them. They run only when Inner Loop Limit is set.\n\nLike PreMacro, a line here also switches the step function to its looping variant and costs Priority its weighting."),
+  },
+
+  StepFunction = {
+    T("Step Function"),
+    T("How the pointer moves through the sequence.\n\nSequential walks 1, 2, 3, 4 and back to the start.\n\nPriority walks 1, then 1-2, then 1-2-3, so the first line takes the largest share of presses and the last the smallest. With six steps that is roughly 29% down to 5%.\n\nThat weighting only holds while PreMacro, PostMacro and Inner Loop Limit are all empty. Fill any of them in and Priority degrades to plain Sequential after about twenty presses."),
+  },
+
+  LoopLimit = {
+    T("Inner Loop Limit"),
+    T("How many times the inner loop repeats before the pointer is allowed past it.\n\nLeave it empty and the sequence loops forever, which is what you want almost always. Setting it is the only way PostMacro ever runs - and it also costs Priority its weighting."),
+  },
+
+  ChannelHold = {
+    T("Hold while channelling"),
+    T("While a channel is running, build the macro from KeyPress with every casting line stripped out: nothing can be re-issued and the step stays where it is.\n\nAny /cast issued during a channel cancels it, so without this a spammed sequence containing a channelled spell never completes a single tick.\n\nThere is no equivalent for ordinary casts. The secure environment a macro runs in can see a channel, but it cannot see a cast, and it has no clock."),
+  },
+
+  CombatReset = {
+    T("Resets"),
+    T("Send the pointer back to the first step when you leave combat, so every pull starts at the top and PreMacro runs again."),
+  },
+
+  ItemSlot = {
+    T("Use"),
+    T("Append /use [combat] for this equipment slot to KeyRelease.\n\nLeft unticked these follow the global setting in the options rather than being off, and the lines they add never appear in the boxes above - but they still count against the 255 character macro limit."),
+  },
+
+  SpecID = {
+    T("Specialisation / Class ID"),
+    T("Which class the sequence is filed under. Ascension is classless, so Global is the sensible choice for most sequences; the hero classes and Reborn trees are there if you would rather group them."),
+  },
+
+  Talents = {
+    T("Talents"),
+    T("Free text note about the build this sequence was written for. Not used for anything, purely a reminder."),
+  },
+
+  Help = {
+    T("Help"),
+    T("Free text shown next to the sequence in the viewer. Worth a line on what the rotation assumes."),
+  },
+
+  Helplink = {
+    T("Help Link"),
+    T("A URL shown with the sequence in the viewer."),
+  },
+
+  Author = {
+    T("Author"),
+    T("Who wrote it. Filled in automatically for new sequences."),
+  },
+
+  VersionDefault = {
+    T("Default"),
+    T("Which macro version is used when nothing more specific applies."),
+  },
+
+  MacroLength = {
+    T("Macro length"),
+    T("Every press builds ONE macro out of three pieces: KeyPress, the line of whichever step is current, and KeyRelease. This counts that macro at its worst - the longest step you have - against the 255 characters WoW allows.\n\nGo over and WoW truncates without a word of warning. It cuts from the end, so KeyRelease goes first and the step's own /cast next, which looks exactly like the rotation doing nothing while KeyPress carries on working.\n\nThe number includes lines you never typed and cannot see in these boxes, which is what usually causes an overflow. From the Options panel:\n\n  Prevent Sound Errors    226 characters (144 in KeyPress, 82 in KeyRelease)\n  Require Target           74 characters (37 in each)\n  Prevent UI Errors        30 characters in KeyRelease\n  Clear UI Errors          27 characters in KeyRelease\n  each ticked item slot    17 characters in KeyRelease\n\nPrevent Sound Errors alone leaves under 30 characters for everything else, so it is almost always the thing to turn off first."),
+  },
+
+  VersionContext = {
+    T("Raid / Party / Dungeon / Heroic / Mythic / PVP"),
+    T("Use a different macro version in this situation. Point it at the Default version if you do not want a separate one - a version is only worth having when the rotation genuinely differs."),
+  },
+}
+
+--- Put a small help icon on a widget, showing the text on hover.
+--    The icon is a plain child frame of the widget rather than another AceGUI
+--    child, so it takes no part in the flow layout and cannot push anything
+--    onto a new line. AceGUI pools its widgets, so the key lives on the frame
+--    and is refreshed on every attach - otherwise a recycled box would keep
+--    showing the previous field's text.
+local function attachHelpIcon(widget, key)
+  if not widget or not widget.frame or not FIELD_HELP[key] then
+    return
+  end
+  local frame = widget.frame
+
+  if not frame.GSEHelpIcon then
+    local icon = CreateFrame("Button", nil, frame)
+    icon:SetWidth(16)
+    icon:SetHeight(16)
+    -- Inside the frame, not above it: these widgets sit in a ScrollFrame, which
+    -- clips anything poking out past its edge.
+    icon:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -4, -2)
+    icon:SetFrameLevel(frame:GetFrameLevel() + 5)
+
+    -- Drawn as text rather than a texture. A texture that fails to load leaves
+    -- an invisible button, and a help icon nobody can find is no help icon.
+    local glyph = icon:CreateFontString(nil, "OVERLAY", "GameFontNormalSmall")
+    glyph:SetPoint("CENTER", icon, "CENTER", 0, 0)
+    glyph:SetText("|cff33ccff[?]|r")
+    icon.glyph = glyph
+
+    icon:SetScript("OnEnter", function(self)
+      local entry = FIELD_HELP[frame.GSEHelpKey]
+      if not entry then
+        return
+      end
+      self.glyph:SetText("|cffffd100[?]|r")
+      GameTooltip:SetOwner(self, "ANCHOR_TOPRIGHT")
+      GameTooltip:AddLine(entry[1], 1, 0.82, 0)
+      GameTooltip:AddLine(entry[2], 1, 1, 1, true)
+      GameTooltip:Show()
+    end)
+    icon:SetScript("OnLeave", function(self)
+      self.glyph:SetText("|cff33ccff[?]|r")
+      GameTooltip:Hide()
+    end)
+
+    frame.GSEHelpIcon = icon
+  end
+
+  frame.GSEHelpKey = key
+  frame.GSEHelpIcon:Show()
+end
+
 local otherversionlistboxvalue = ""
 local default = 1
 local raid = 1
@@ -142,6 +303,67 @@ end)
 
 local specdropdownvalue = editframe.SpecID
 
+
+--- Attach a field help icon, saying so if it cannot.
+--    The attach calls sit at the very end of the draw functions, and AceGUI
+--    wraps those in safecall, so anything wrong here vanishes without a trace
+--    and simply leaves the icons missing. Report it once instead.
+--- Update the "Macro: n / 255" readout from what is currently in the boxes.
+--    Counts the whole macro a click will build - KeyPress, the longest step and
+--    KeyRelease - and runs it through GSE.PrepareKeyPress/PrepareKeyRelease so
+--    the lines GSE adds behind your back are included. Those are exactly what
+--    catches people out: Prevent Sound Errors alone contributes about 220
+--    characters that appear in none of these boxes.
+local function refreshMacroLength()
+  local widgets = editframe.MacroWidgets
+  if not widgets or not widgets.LengthLabel then
+    return
+  end
+  local stored = editframe.Sequence
+    and editframe.Sequence.MacroVersions
+    and editframe.Sequence.MacroVersions[widgets.version]
+  if type(stored) ~= "table" then
+    return
+  end
+
+  -- A throwaway version built from the screen, so the number tracks typing
+  -- rather than the last save. The slot flags come from the stored version
+  -- because their checkboxes write straight to it.
+  local probe = {
+    KeyPress = GSE.SplitMeIntolines(widgets.KeyPress:GetText() or ""),
+    KeyRelease = GSE.SplitMeIntolines(widgets.KeyRelease:GetText() or ""),
+    Head = stored.Head, Neck = stored.Neck, Belt = stored.Belt,
+    Ring1 = stored.Ring1, Ring2 = stored.Ring2,
+    Trinket1 = stored.Trinket1, Trinket2 = stored.Trinket2,
+  }
+  local keypress = table.concat(GSE.PrepareKeyPress(probe), "\n")
+  local keyrelease = table.concat(GSE.PrepareKeyRelease(probe), "\n")
+
+  local longest = 0
+  for _, line in ipairs(GSE.SplitMeIntolines(widgets.Sequence:GetText() or "")) do
+    if string.len(line) > longest then
+      longest = string.len(line)
+    end
+  end
+  for _, line in ipairs(GSE.SplitMeIntolines(widgets.PreMacro:GetText() or "")) do
+    if string.len(line) > longest then
+      longest = string.len(line)
+    end
+  end
+
+  local total = string.len(keypress) + 1 + longest + 1 + string.len(keyrelease)
+  local colour = (total > 255) and "|cffff4040" or "|cff40ff40"
+  local note = (total > 255) and " - too long" or ""
+  widgets.LengthLabel:SetText(string.format("%sMacro: %d / 255|r%s", colour, total, note))
+end
+
+local function attachHelp(widget, key)
+  local ok, err = pcall(attachHelpIcon, widget, key)
+  if not ok and not editframe.helpWarned then
+    editframe.helpWarned = true
+    GSE.Print("Field help icon failed: " .. tostring(err), GNOME)
+  end
+end
 
 function GSE.GUICreateEditorTabs()
   local tabl = {
@@ -557,6 +779,19 @@ function GSE:GUIDrawMetadataEditor(container)
   contentcontainer:AddChild(defgroup3)
   contentcontainer:AddChild(defgroup4)
   container:AddChild(scrollcontainer)
+
+  attachHelp(speciddropdown, "SpecID")
+  attachHelp(talentseditbox, "Talents")
+  attachHelp(helpeditbox, "Help")
+  attachHelp(helplinkeditbox, "Helplink")
+  attachHelp(authoreditbox, "Author")
+  attachHelp(defaultdropdown, "VersionDefault")
+  attachHelp(raiddropdown, "VersionContext")
+  attachHelp(mythicdropdown, "VersionContext")
+  attachHelp(pvpdropdown, "VersionContext")
+  attachHelp(dungeondropdown, "VersionContext")
+  attachHelp(heroicdropdown, "VersionContext")
+  attachHelp(partydropdown, "VersionContext")
 end
 
 function GSE:GUIDrawMacroEditor(container, version)
@@ -650,6 +885,11 @@ function GSE:GUIDrawMacroEditor(container, version)
   end)
   linegroup1:AddChild(channelhold)
 
+  local macrolength = AceGUI:Create("Label")
+  macrolength:SetWidth(160)
+  macrolength:SetText("")
+  linegroup1:AddChild(macrolength)
+
   local spacerlabel7 = AceGUI:Create("Label")
   spacerlabel7:SetWidth(5)
   linegroup1:AddChild(spacerlabel7)
@@ -679,6 +919,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   end
   KeyPressbox:SetCallback("OnTextChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].KeyPress = GSE.SplitMeIntolines(value)
+    refreshMacroLength()
   end)
   linegroup2:AddChild(KeyPressbox)
 
@@ -697,6 +938,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   end
   PreMacro:SetCallback("OnTextChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].PreMacro = GSE.SplitMeIntolines(value)
+    refreshMacroLength()
   end)
   linegroup2:AddChild(PreMacro)
 
@@ -721,6 +963,7 @@ function GSE:GUIDrawMacroEditor(container, version)
     for k,v in ipairs(newpairs) do
       editframe.Sequence.MacroVersions[version][k] = v
     end
+    refreshMacroLength()
   end)
   contentcontainer:AddChild(spellbox)
 
@@ -740,6 +983,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   end
   KeyReleasebox:SetCallback("OnTextChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].KeyRelease = GSE.SplitMeIntolines(value)
+    refreshMacroLength()
   end)
   linegroup3:AddChild(KeyReleasebox)
 
@@ -778,7 +1022,9 @@ function GSE:GUIDrawMacroEditor(container, version)
     Sequence = spellbox,
     KeyRelease = KeyReleasebox,
     PostMacro = PostMacro,
+    LengthLabel = macrolength,
   }
+  refreshMacroLength()
 
   layoutcontainer:AddChild(scrollcontainer)
 
@@ -829,6 +1075,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   headcheckbox:SetLabel(L["Head"])
   headcheckbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Head = value
+    refreshMacroLength()
   end)
   headcheckbox:SetValue(editframe.Sequence.MacroVersions[version].Head)
 
@@ -841,6 +1088,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   neckcheckbox:SetLabel(L["Neck"])
   neckcheckbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Neck = value
+    refreshMacroLength()
   end)
   neckcheckbox:SetValue(editframe.Sequence.MacroVersions[version].Neck)
   toolbarcontainer:AddChild(neckcheckbox)
@@ -852,6 +1100,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   beltcheckbox:SetLabel(L["Belt"])
   beltcheckbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Belt = value
+    refreshMacroLength()
   end)
   beltcheckbox:SetValue(editframe.Sequence.MacroVersions[version].Belt)
   toolbarcontainer:AddChild(beltcheckbox)
@@ -863,6 +1112,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   ring1checkbox:SetLabel(L["Ring 1"])
   ring1checkbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Ring1 = value
+    refreshMacroLength()
   end)
   ring1checkbox:SetValue(editframe.Sequence.MacroVersions[version].Ring1)
   toolbarcontainer:AddChild(ring1checkbox)
@@ -874,6 +1124,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   ring2checkbox:SetLabel(L["Ring 2"])
   ring2checkbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Ring2 = value
+    refreshMacroLength()
   end)
   ring2checkbox:SetValue(editframe.Sequence.MacroVersions[version].Ring2)
   toolbarcontainer:AddChild(ring2checkbox)
@@ -885,6 +1136,7 @@ function GSE:GUIDrawMacroEditor(container, version)
   trinket1checkbox:SetLabel(L["Trinket 1"])
   trinket1checkbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Trinket1 = value
+    refreshMacroLength()
   end)
   trinket1checkbox:SetValue(editframe.Sequence.MacroVersions[version].Trinket1)
   toolbarcontainer:AddChild(trinket1checkbox)
@@ -896,12 +1148,27 @@ function GSE:GUIDrawMacroEditor(container, version)
   trinket2checkbox:SetLabel(L["Trinket 2"])
   trinket2checkbox:SetCallback("OnValueChanged", function (sel, object, value)
     editframe.Sequence.MacroVersions[version].Trinket2 = value
+    refreshMacroLength()
   end)
   trinket2checkbox:SetValue(editframe.Sequence.MacroVersions[version].Trinket2)
   toolbarcontainer:AddChild(trinket2checkbox)
 
   layoutcontainer:AddChild(toolbarcontainer)
   container:AddChild(layoutcontainer)
+
+  attachHelp(stepdropdown, "StepFunction")
+  attachHelp(looplimit, "LoopLimit")
+  attachHelp(channelhold, "ChannelHold")
+  attachHelp(macrolength, "MacroLength")
+  attachHelp(KeyPressbox, "KeyPress")
+  attachHelp(PreMacro, "PreMacro")
+  attachHelp(spellbox, "Sequence")
+  attachHelp(KeyReleasebox, "KeyRelease")
+  attachHelp(PostMacro, "PostMacro")
+  -- On the two column headings rather than the checkboxes themselves: those are
+  -- only 78 wide and an icon in the corner would sit on top of their labels.
+  attachHelp(heading2, "CombatReset")
+  attachHelp(heading1, "ItemSlot")
 end
 
 --- Read the macro editor's boxes back into the sequence.
