@@ -124,6 +124,18 @@ local FIELD_HELP = {
 --    onto a new line. AceGUI pools its widgets, so the key lives on the frame
 --    and is refreshed on every attach - otherwise a recycled box would keep
 --    showing the previous field's text.
+--- Every icon created so far, so they can all be hidden before a redraw.
+--    AceGUI hands the same widget back for a different field later on. Without
+--    this the icon stays put with the previous field's text - the Sequence Name
+--    box inherited the Inner Loop Limit help that way.
+local helpIcons = {}
+
+local function hideAllHelpIcons()
+  for _, icon in ipairs(helpIcons) do
+    icon:Hide()
+  end
+end
+
 local function attachHelpIcon(widget, key)
   if not widget or not widget.frame or not FIELD_HELP[key] then
     return
@@ -163,6 +175,7 @@ local function attachHelpIcon(widget, key)
     end)
 
     frame.GSEHelpIcon = icon
+    table.insert(helpIcons, icon)
   end
 
   frame.GSEHelpKey = key
@@ -390,6 +403,7 @@ end
 function GSE.GUIEditorPerformLayout(frame)
   -- Everything is about to be released, so the remembered widgets go stale.
   editframe.MacroWidgets = nil
+  hideAllHelpIcons()
 
   -- AceGUI:Release calls widget:OnRelease() before it empties widget.events,
   -- and an EditBox clears itself in OnRelease. Its OnTextChanged does not test
@@ -1238,6 +1252,7 @@ function GSE.GUISelectEditorTab(container, event, group)
   -- Leaving a version tab releases its widgets, so take their contents first.
   GSE.GUICommitMacroEditor()
   editframe.MacroWidgets = nil
+  hideAllHelpIcons()
   editframe.releasing = true
   container:ReleaseChildren()
   editframe.releasing = false
