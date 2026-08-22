@@ -91,6 +91,24 @@ if ($missingShadow.Count) { $problems += "enUSSHADOW.lua : $($missingShadow.Coun
 Write-Host ("{0,-34} {1} shadow IDs missing from key table" -f 'cross-check shadow -> key', $missingShadow.Count) `
   -ForegroundColor $(if ($missingShadow.Count) { 'Red' } else { 'Green' })
 
+# ...and it writes the key table's name for that ID back into the macro. If the
+# key table names the ID something else, saving a sequence silently renames the
+# spell instead of failing, so the two tables must round-trip: for every entry
+# name -> id in the hash, enUS.lua[id] has to be that same name.
+# Compared ordinally: Lua tables are case-sensitive, and Ascension has names
+# that differ only in capitalisation, which PowerShell's default -ne would call
+# equal.
+$keyNames = @{}
+foreach ($e in $key) { $keyNames[$e.Key.Trim('[', ']')] = $e.Value.Trim('"') }
+$renamed = @($hash | Where-Object { $keyNames.ContainsKey($_.Value) -and $keyNames[$_.Value] -cne $_.Key.Trim('"') })
+if ($renamed.Count) {
+  $problems += "enUSHash.lua : {0} names round-trip to a different name (e.g. {1})" -f `
+    $renamed.Count, (($renamed | Select-Object -First 5 | ForEach-Object {
+      "$($_.Key.Trim('"')) -> $($_.Value) -> $($keyNames[$_.Value])" }) -join '; ')
+}
+Write-Host ("{0,-34} {1} names renamed by a round-trip" -f 'round-trip name -> id -> name', $renamed.Count) `
+  -ForegroundColor $(if ($renamed.Count) { 'Red' } else { 'Green' })
+
 Write-Host ''
 if ($problems.Count) {
   Write-Host "FAILED:" -ForegroundColor Red

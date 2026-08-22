@@ -78,14 +78,27 @@ function ConvertTo-LuaString {
 }
 
 $nameById = @{}   # spellID -> name  (every castable ID)
-$idByName = @{}   # name    -> primary spellID
 $skippedNoName = 0
 
-# Sort by record ID so the "primary" ID chosen for a duplicated name is stable
-# across runs regardless of hashtable ordering.
+# Lua tables are case-sensitive and Ascension ships names that differ only in
+# capitalisation ("Wild Magic" vs "Wild MAGIC"), so every map keyed by a spell
+# name has to compare ordinally. A default PowerShell hashtable folds the two
+# into one entry, which then emits one casing against the other's spell ID.
+function New-OrdinalMap { New-Object System.Collections.Hashtable -ArgumentList ([System.StringComparer]::Ordinal) }
+$idsByName = New-OrdinalMap  # name -> candidate spell IDs, newest record first
+
+# Sort by record ID so every choice below is stable across runs regardless of
+# hashtable ordering.
 $castable = @($cad | Where-Object { $CASTABLE[[string]$_["Type"]] }) |
   Sort-Object { [int]$_["ID"] }
 
+# Ascension keeps superseded advancement records alongside the live ones, so
+# several records claim the same spell ID under different names. They come in
+# generations that only the record ID separates: Realms=0, then Realms=6144 with
+# the old thematic tabs, then the current Tab="Class" trees. Spell 801576 is
+# "Ancestor's Fury" in record 18845 and "Ancestral Strike" in record 32076 - the
+# latter is what the client shows. The newest record therefore owns the name,
+# which iterating in ascending ID order and letting the last write win gives us.
 foreach ($rec in $castable) {
   $name = [string]$rec["Name"]
   if ([string]::IsNullOrWhiteSpace($name)) { $skippedNoName++; continue }
@@ -93,25 +106,44 @@ foreach ($rec in $castable) {
   $spellIds = @($rec["Spells"])
   if ($spellIds.Count -eq 0) { continue }
 
-  foreach ($sid in $spellIds) {
-    $id = [int]$sid
-    if (-not $nameById.ContainsKey($id)) { $nameById[$id] = $name }
-  }
+  $ids = @($spellIds | ForEach-Object { [int]$_ })
+  foreach ($id in $ids) { $nameById[$id] = $name }
 
-  # First record wins the name, and it claims that record's first spell ID.
-  if (-not $idByName.ContainsKey($name)) { $idByName[$name] = [int]$spellIds[0] }
+  # Prepend, so the newest record's IDs are considered first while each record
+  # keeps its own rank order.
+  if ($idsByName.ContainsKey($name)) { $idsByName[$name] = @($ids) + $idsByName[$name] }
+  else { $idsByName[$name] = $ids }
 }
 
-# Every ID referenced by the hash tables must resolve in the key table, or
-# GSE.TranslateSpell treats the lookup as a miss and marks the spell unknown.
-foreach ($name in @($idByName.Keys)) {
-  $id = $idByName[$name]
-  if (-not $nameById.ContainsKey($id)) { $nameById[$id] = $name }
+# GSE.TranslateSpell resolves a name to an ID through the hash table and then
+# writes back whatever the key table calls that ID, so the two have to
+# round-trip. A name pointing at an ID the key table names differently does not
+# fail loudly - it silently rewrites the macro, which is how "/cast Ancestral
+# Strike" used to come back from a save as "/cast Ancestor's Fury". So only
+# accept an ID that maps back to this exact name, newest record first.
+#
+# A name with no such ID exists only on superseded records: every spell it once
+# granted is now called something else. Leaving it out of the hash is the point -
+# GSE.TranslateSpell then falls through to GetSpellInfo and passes the text
+# through untouched (or flags it unknown), rather than renaming the player's
+# spell to whatever supplanted it.
+$idByName = New-OrdinalMap
+$superseded = @()
+foreach ($name in ($idsByName.Keys | Sort-Object)) {
+  $pick = $null
+  foreach ($id in $idsByName[$name]) {
+    if ($nameById[$id] -ceq $name) { $pick = $id; break }
+  }
+  if ($null -ne $pick) { $idByName[$name] = $pick } else { $superseded += $name }
 }
 
 Write-Host ("  castable records: {0}  unique IDs: {1}  unique names: {2}" -f `
   $castable.Count, $nameById.Count, $idByName.Count) -ForegroundColor Green
 if ($skippedNoName) { Write-Host ("  skipped (no name): {0}" -f $skippedNoName) -ForegroundColor DarkYellow }
+if ($superseded.Count) {
+  Write-Host ("  superseded names left out of the hash: {0}" -f $superseded.Count) -ForegroundColor DarkYellow
+  foreach ($n in $superseded) { Write-Verbose ("    {0} -> now {1}" -f $n, $nameById[$idsByName[$n][0]]) }
+}
 
 $header = @"
 -- GENERATED FILE - DO NOT EDIT BY HAND

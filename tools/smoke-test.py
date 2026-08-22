@@ -270,9 +270,23 @@ def main():
     missing = [(name, sid) for name, sid in hash_t.items() if key[sid] is None]
     check("every hash ID resolves in key table", not missing, f"{len(missing)} missing e.g. {missing[:3]}")
 
+    # ...and TranslateSpell writes the key table's name for that ID back into the
+    # macro, so the pair has to round-trip. A name resolving to an ID the key
+    # table calls something else does not fail loudly - it silently renames the
+    # spell when a sequence is saved.
+    renamed = [(name, sid, key[sid]) for name, sid in hash_t.items()
+               if key[sid] is not None and key[sid] != name]
+    check("every hash name round-trips", not renamed,
+          f"{len(renamed)} renamed e.g. {renamed[:3]}")
+
     check("Ascension-corrected name for 99", key[99] == "Demoralizing Roar", f"got {key[99]}")
     check("Ascension-corrected name for 1719", key[1719] == "Recklessness", f"got {key[1719]}")
     check("retail-only name is gone", hash_t["Incapacitating Roar"] is None)
+    # 801576 is "Ancestor's Fury" on a superseded advancement record and
+    # "Ancestral Strike" on the live one; the live name has to win, or the editor
+    # renames the Barbarian's macro on save.
+    check("newest record wins a reused spell ID", key[801576] == "Ancestral Strike",
+          f"got {key[801576]}")
     check("high-ID custom spell present", key[1191234] == "Brilliance Aura", f"got {key[1191234]}")
     check("shadow table is lower-cased", shadow["frostbolt"] is not None)
     check("shadow maps to a real ID", key[shadow["power word: shield"]] == "Power Word: Shield")
